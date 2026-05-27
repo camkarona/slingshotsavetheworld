@@ -1,0 +1,3380 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>새총 로그라이크 - Phase 2A</title>
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
+    <style>
+        body { margin: 0; background: radial-gradient(ellipse at center, #1a1206 0%, #0a0804 60%, #050402 100%); display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; }
+        canvas { box-shadow: 0 0 55px rgba(232,160,40,0.28), 0 0 120px rgba(232,120,20,0.12), 0 0 6px rgba(255,200,80,0.35); border-radius: 2px; }
+    </style>
+</head>
+<body>
+<!-- ── 오디오 엘리먼트: file:// CORS 우회 (Phaser XHR 미사용) ── -->
+<audio id="bgm-intro" src="0mainintrosong.mp3"         loop preload="auto" style="display:none"></audio>
+<audio id="bgm-game"  src="1slingshottosavetheworld.mp3" loop preload="auto" style="display:none"></audio>
+<script src="data.js"></script>
+<script>
+const config = {
+    type: Phaser.AUTO,
+    width: 1280,
+    height: 720,
+    backgroundColor: '#0e0b06',
+    antialias: true,
+    antialiasGL: true,
+    scale: {
+        mode: Phaser.Scale.FIT,
+        autoCenter: Phaser.Scale.CENTER_BOTH,
+        width: 1280,
+        height: 720,
+    },
+    physics: {
+        default: 'arcade',
+        arcade: { gravity: { y: 600 }, debug: false }
+    },
+    // scene: 아래 씬 클래스 정의 후 파일 끝에서 등록
+};
+
+// ─── 월드 / 카메라 상수 ───────────────────────────────
+const WORLD_W       = 12000;  // 물리 월드 가로 (px) — 배경 렌더링용 유지
+const WORLD_LIMIT_X = 4200;   // 플레이어블 영역 우측 한계 (절벽 위치)
+const WORLD_TOP     = -8000;  // 월드 상단
+const WORLD_H       = 9000;   // 월드 세로 높이 (WORLD_TOP 기준)
+
+// ─── 게임 상수 ────────────────────────────────────────
+const SLING_CENTER = { x: 320, y: 550 };
+const PRONG_L      = { x: 300, y: 520 };
+const PRONG_R      = { x: 340, y: 520 };
+const BASE_DRAG    = 150;
+const BASE_LAUNCH  = 5.5;
+const MAX_AMMO     = 30;
+const CAM_RETURN_MS = 850;  // 카메라 복귀 애니메이션 시간
+const CAM_HOME_Y          = SLING_CENTER.y - 170; // 새총이 화면 하단 70%에 오는 카메라 Y 기준점
+const CAM_FOLLOW_OFFSET_Y = SLING_CENTER.y - CAM_HOME_Y; // = 170 — startFollow 오프셋 (홈 좌표와 정렬)
+
+// 적 타입 / 스테이지 데이터는 data.js 에서 로드
+// (BIRD_TYPES, MOTH_TYPE, EAGLE_TYPE, STAGE_DATA, ENEMY_DATA)
+
+// 기본 돌멩이 데미지 (패시브로 변경 예정)
+const STONE_DAMAGE      = 1;
+const GROUND_Y          = 680;   // 흙 표층 상단 (배경 fillRect y=680 기준)
+const PASSIVE_MAX_STACK = 2;   // 기본 최대 스택 (큰돌·조준선·농구공)
+// 패시브별 개별 최대 스택 (미정의 시 PASSIVE_MAX_STACK 사용)
+const PASSIVE_MAX_STACK_OF = {
+    '탄성증가': 3,   // 발사력 1.2^3 = 약 1.73배
+    '큰돌':     3,   // 돌 크기 2^3 = 8배
+    '파워업':   3,   // 데미지 2^3 = 8배
+    '관통':     1,   // 무한관통
+    '산탄':     1,   // 3방향 동시 발사
+    '폭발':     1,   // 범위 폭발
+    '자석탄':   1,   // 정점에서 1회 유도 (스택 없음)
+    '돌을 줍다': 3,  // 즉시 +2 돌멩이 (1회성 × 최대 3번)
+    '번개탄':   1,  // 2초마다 주변 번개 공격
+};
+
+// ─── 미니맵 상수 ──────────────────────────────────────
+const MM_X = 8,   MM_Y = 276;     // 미니맵 좌상단 — 패널(h=240) + 토글버튼(26px) 아래
+const MM_W = 220, MM_H = 158;     // 패널 너비에 맞춤
+const MM_WY0 = -450, MM_WY1 = 800;
+const MM_WX0 = 0,    MM_WX1 = WORLD_LIMIT_X; // WORLD_LIMIT_X 와 동일
+
+// ┌─────────────────────────────────────────────────────────────────────┐
+// │  기획자 조정 구역 — 기증 힌트 문구 (현재 사용 중)                      │
+// │  donated / materialStock 비율 기준. minRatio 내림차순 유지.           │
+// └─────────────────────────────────────────────────────────────────────┘
+// ─── 기증 절대량 기반 희귀도 테이블 ─────────────────────
+// minAmount 내림차순 유지. 기증량이 minAmount 이상이면 해당 행 적용.
+const RARITY_TABLE = [
+    { minAmount: 300, hint: 'EPIC 압도적  /  레어·노멀 소량',    weights: { NORMAL:  5, RARE: 25, EPIC: 70 } },
+    { minAmount: 200, hint: 'EPIC 우세  /  레어 일부',           weights: { NORMAL: 10, RARE: 40, EPIC: 50 } },
+    { minAmount: 120, hint: '레어·EPIC 혼전',                    weights: { NORMAL: 20, RARE: 50, EPIC: 30 } },
+    { minAmount:  80, hint: '레어 우세  /  EPIC 등장 가능',      weights: { NORMAL: 35, RARE: 50, EPIC: 15 } },
+    { minAmount:  50, hint: '레어 높음  /  EPIC 소량',           weights: { NORMAL: 55, RARE: 40, EPIC:  5 } },
+    { minAmount:  30, hint: '레어 등장 가능  /  노멀',           weights: { NORMAL: 75, RARE: 25, EPIC:  0 } },
+    { minAmount:  20, hint: '레어 소량  /  노멀',                weights: { NORMAL: 90, RARE: 10, EPIC:  0 } },
+    { minAmount:  10, hint: '노멀만 등장',                       weights: { NORMAL:100, RARE:  0, EPIC:  0 } },
+];
+
+// ┌─────────────────────────────────────────────────────────────────────┐
+// │  [미래 구현 예정] 희귀도 가중치 기반 패시브 선택 시스템                  │
+// │                                                                     │
+// │  개요:                                                               │
+// │  • 박사님께 기증한 비율(donationRatio = 기증량 ÷ 보유량)이 높을수록     │
+// │    RARE / EPIC / LEGENDARY 등장 확률이 올라간다.                      │
+// │  • 3장의 카드를 각각 독립적으로 희귀도 추첨 후 해당 등급에서 뽑는다.    │
+// │                                                                     │
+// │  활성화 방법:                                                         │
+// │  showPassiveSelection() 안의 POOL 생성 줄을                          │
+// │    const POOL = buildRarityPool(donationRatio);  으로 교체            │
+// │  (donationRatio는 showDonationUI → showPassiveSelection 인자로 전달)  │
+// └─────────────────────────────────────────────────────────────────────┘
+/*
+// ── 패시브 스택 조회 헬퍼 ────────────────────────────────────────────
+// function getPassiveStack(name) {
+//     const map = { '탄성증가': armMuscleStack, '큰돌': bigStoneStack,
+//                   '파워업': ironBallStack,  '조준선': aimLineStack };
+//     return map[name] ?? 0;
+// }
+
+// ── 희귀도 가중치 테이블 ─────────────────────────────────────────────
+// donationRatio 기준 내림차순 정렬 유지. 합계는 100 권장.
+// LEGENDARY는 아직 패시브 미구현 — 등장 시 EPIC으로 fallback 처리.
+//
+// const RARITY_WEIGHT_TABLE = [
+//   // minRatio  NORMAL  RARE  EPIC  LEGENDARY
+//   { min: 0.8,  w: { NORMAL: 15, RARE: 35, EPIC: 35, LEGENDARY: 15 } },
+//   { min: 0.5,  w: { NORMAL: 35, RARE: 40, EPIC: 20, LEGENDARY:  5 } },
+//   { min: 0.3,  w: { NORMAL: 60, RARE: 32, EPIC:  8, LEGENDARY:  0 } },
+//   { min: 0.0,  w: { NORMAL: 85, RARE: 15, EPIC:  0, LEGENDARY:  0 } },
+// ];
+
+// ── 희귀도 추첨 함수 ─────────────────────────────────────────────────
+// function rollRarity(donationRatio) {
+//     const row = RARITY_WEIGHT_TABLE.find(r => donationRatio >= r.min)
+//                 ?? RARITY_WEIGHT_TABLE[RARITY_WEIGHT_TABLE.length - 1];
+//     const w = row.w;
+//     const total = w.NORMAL + w.RARE + w.EPIC + w.LEGENDARY;
+//     let rand = Math.random() * total;
+//     if ((rand -= w.NORMAL)     < 0) return 'NORMAL';
+//     if ((rand -= w.RARE)       < 0) return 'RARE';
+//     if ((rand -= w.EPIC)       < 0) return 'EPIC';
+//     return 'LEGENDARY';
+// }
+
+// ── 희귀도별 패시브 1개 뽑기 ─────────────────────────────────────────
+// alreadyPicked: 이번 카드 구성에서 이미 선택된 패시브 이름 배열 (중복 방지)
+// function pickOneByRarity(rarity, alreadyPicked) {
+//     let candidates = ALL_PASSIVES.filter(p =>
+//         p.rarity === rarity &&
+//         !alreadyPicked.includes(p.name) &&
+//         getPassiveStack(p.name) < PASSIVE_MAX_STACK
+//     );
+//     // 해당 등급에 뽑을 수 있는 패시브가 없으면 한 등급 낮춰 재시도
+//     if (candidates.length === 0 && rarity !== 'NORMAL') {
+//         const fallback = { LEGENDARY: 'EPIC', EPIC: 'RARE', RARE: 'NORMAL' };
+//         return pickOneByRarity(fallback[rarity], alreadyPicked);
+//     }
+//     if (candidates.length === 0) return null;
+//     return candidates[Phaser.Math.Between(0, candidates.length - 1)];
+// }
+
+// ── 3장 카드 풀 빌드 (희귀도 가중치 적용) ────────────────────────────
+// function buildRarityPool(donationRatio) {
+//     const pool = [], pickedNames = [];
+//     for (let i = 0; i < 3; i++) {
+//         const rarity  = rollRarity(donationRatio);
+//         const passive = pickOneByRarity(rarity, pickedNames);
+//         if (!passive) break;          // 더 이상 뽑을 패시브 없음
+//         pool.push(passive);
+//         pickedNames.push(passive.name);
+//     }
+//     return pool;
+// }
+*/
+
+// ─── 가변 게임 상태 ───────────────────────────────────
+let launchMult     = BASE_LAUNCH;
+let isDragging     = false;
+let currentAmmo    = MAX_AMMO;
+let currentMaxAmmo = MAX_AMMO;   // 이번 라운드 최대 돌멩이 (돌을 줍다 반영)
+let grandTotalBirds = 0;   // 게임 전체(10스테이지) 총 오염 생물 수 — 게임 시작 시 1회 계산
+let remainingBirds  = 0;   // 아직 처치 안 한 오염 생물 수 (처치할 때마다 감소)
+let totalBirdsHit  = 0;
+let roundBirdsHit  = 0;
+let roundMaterial  = 0;
+let materialStock  = 0;
+let roundNumber    = 1;
+let isRoundEnding   = false;
+let armMuscleStack  = 0;
+let bigStoneStack   = 0;
+let ironBallStack   = 0;
+let aimLineStack    = 0;   // 0=조준선 없음, 1=50%, 2+=100%
+let piercingStack   = 0;   // 관통 (EPIC)
+let basketballStack = 0;   // 농구공 (RARE)
+let shotgunStack    = 0;   // 산탄 (EPIC): 3방향 동시 발사
+let magnetStack     = 0;   // 자석탄 (RARE): 가까운 적 유도
+let explosionStack  = 0;   // 폭발 (EPIC): 범위 폭발
+let pickupStoneStack = 0;  // 돌을 줍다 (NORMAL): 즉시 +2 돌멩이 (1회성)
+let lightningStack   = 0;  // 번개탄 (EPIC): 2초마다 주변 번개 공격
+
+// ─── 패시브 토글 시스템 ──────────────────────────────
+// 각 발사마다 패시브 취사선택 가능. false = 이번 발사에서 비활성화
+const passiveActive = {};   // { '탄성증가': true, '농구공': false, ... }
+let uiPassiveLines = [];    // 패널 안 패시브 토글 텍스트 오브젝트 목록
+
+let cameraFollowing = false;
+
+// 맵 드래그 상태
+let isMapDragging  = false;
+let mapDragOriginX = 0, mapDragOriginY = 0;
+let mapDragScrollX = 0, mapDragScrollY = 0;
+
+// 미니맵 갱신 프레임 카운터 (성능 최적화)
+let minimapFrame = 0;
+
+// ─── 씬 오브젝트 ──────────────────────────────────────
+let sceneRef     = null;
+let currentStone = null;
+let activeStones, birds;
+let rubberBandGraphics, trajectoryGraphics, hpBarGraphics, minimapGraphics;
+let uiRoundText, uiAmmoText, uiPassiveText;
+let uiAimBtn = null, uiAimBtnTxt = null;
+let uiOverlay = null;
+let uiPollutionText = null;
+let uiResearchBtn = null, uiResearchBtnTxt = null;  // 박사님 연구 버튼 (HUD)
+let uiPanelBg = null, uiPanelTitle = null, uiPanelContent = null;
+
+// 오버레이 버튼 히트 영역 — clearOverlay()로 초기화됨
+let overlayHitAreas = [];
+// 영구 히트 영역 — clearOverlay() 와 무관하게 항상 살아있는 버튼 (미니맵 토글 등)
+let permanentHitAreas = [];
+
+// 미니맵 토글 상태 / UI 오브젝트
+let minimapVisible  = true;
+let uiMinimapBtnBg  = null, uiMinimapBtnTxt = null;
+
+// ─── 오디오 상태 ──────────────────────────────────────
+let currentBgm      = null;
+let bgmFadeTimer    = null;   // 진행 중인 페이드 타이머 ID (씬 전환 시 취소용)
+let bgmVolume       = 0.5;    // 0.0 ~ 1.0
+let sfxVolume       = 0.5;    // 0.0 ~ 1.0 (SFX 전용, 미래 확장용)
+
+/**
+ * playBgm(scene, key)
+ * ─ HTML <audio> 태그 직접 제어 방식
+ * ─ file:// 프로토콜의 CORS 차단을 완전히 우회
+ *   (Phaser의 XHR 오디오 로더 미사용)
+ * scene 파라미터는 하위 호환 유지용 (사용하지 않음)
+ */
+function playBgm(_scene, key) {
+    // 진행 중인 페이드 타이머 즉시 취소 (씬 전환 타이밍 충돌 방지)
+    if (bgmFadeTimer) { clearInterval(bgmFadeTimer); bgmFadeTimer = null; }
+
+    // 기존 BGM 정지
+    if (currentBgm) {
+        currentBgm.pause();
+        currentBgm.currentTime = 0;
+        currentBgm = null;
+    }
+
+    const elId = key === 'introMusic' ? 'bgm-intro' : 'bgm-game';
+    const el   = document.getElementById(elId);
+    if (!el) {
+        console.warn(`[BGM] <audio id="${elId}"> 엘리먼트를 찾지 못했습니다.`);
+        return;
+    }
+
+    el.volume      = bgmVolume;
+    el.currentTime = 0;
+    const promise  = el.play();
+    if (promise !== undefined) {
+        promise
+            .then(() => console.log(`[BGM] "${key}" 재생 시작 (볼륨 ${Math.round(bgmVolume * 100)}%)`))
+            .catch(e  => console.warn(`[BGM] "${key}" 재생 실패:`, e));
+    }
+    currentBgm = el;   // HTMLAudioElement 참조 저장
+}
+
+// ══════════════════════════════════════════════════════
+//  CLICK TO START 씬
+// ══════════════════════════════════════════════════════
+class ClickToStartScene extends Phaser.Scene {
+    constructor() { super({ key: 'ClickToStart' }); }
+
+    preload() {
+        // 오디오는 HTML <audio> 태그로 처리 (file:// CORS 우회)
+        // → Phaser load.audio() 미사용
+    }
+
+    create() {
+        const W = 1280, H = 720;
+
+        // 배경 + 별
+        const bg = this.add.graphics();
+        bg.fillStyle(0x07070d, 1).fillRect(0, 0, W, H);
+        for (let i = 0; i < 170; i++) {
+            bg.fillStyle(0xffffff, Phaser.Math.FloatBetween(0.04, 0.55));
+            bg.fillCircle(Phaser.Math.Between(0, W), Phaser.Math.Between(0, H),
+                          Phaser.Math.FloatBetween(0.5, 1.8));
+        }
+        // 스캔라인
+        for (let y = 0; y < H; y += 4) bg.fillStyle(0x000000, 0.07).fillRect(0, y, W, 2);
+
+        // 희미한 타이틀 힌트
+        this.add.text(W / 2, 262, 'THE SLINGSHOT TO RESCUE WORLD', {
+            fontFamily: '"Arial Black", Arial', fontSize: '22px', color: '#0e2828'
+        }).setOrigin(0.5);
+        this.add.text(W / 2, 298, '세상을 구하는 새 총', {
+            fontFamily: '"Arial Black", Arial', fontSize: '16px', color: '#0a1e1e'
+        }).setOrigin(0.5);
+
+        // CLICK TO START
+        const ct = this.add.text(W / 2, 385, 'CLICK  TO  START', {
+            fontFamily: '"Arial Black", Arial', fontSize: '50px',
+            color: '#ffffff', stroke: '#4af0c8', strokeThickness: 3
+        }).setOrigin(0.5);
+        this.tweens.add({
+            targets: ct, alpha: 0.1, duration: 950,
+            yoyo: true, repeat: -1, ease: 'Sine.easeInOut'
+        });
+
+        // 하단 크레딧
+        this.add.text(W / 2, 710, 'Developed by  Karona Games', {
+            fontFamily: 'Arial', fontSize: '14px', color: '#182828'
+        }).setOrigin(0.5, 1);
+
+        this.cameras.main.fadeIn(1200, 0, 0, 0);
+        this.input.on('pointerdown', () => {
+            this.cameras.main.fadeOut(500, 0, 0, 0);
+            this.cameras.main.once('camerafadeoutcomplete', () => this.scene.start('IntroScene'));
+        });
+    }
+}
+
+// ══════════════════════════════════════════════════════
+//  INTRO (타이틀) 씬
+// ══════════════════════════════════════════════════════
+class IntroScene extends Phaser.Scene {
+    constructor() { super({ key: 'IntroScene' }); }
+
+    create() {
+        const W = 1280, H = 720;
+        this.W = W; this.H = H;
+        this.modalOpen   = false;
+        this.stoneFlying = false;
+        this.stoneVX = 0; this.stoneVY = 0;
+        this.particles   = [];
+        this.birdAlive   = true;
+        this.birdRespawnTimer = 0;
+
+        // ── 배경 ────────────────────────────────────────
+        const bg = this.add.graphics();
+        bg.fillStyle(0x07070d, 1).fillRect(0, 0, W, H);
+        for (let i = 0; i < 200; i++) {
+            bg.fillStyle(0xffffff, Phaser.Math.FloatBetween(0.03, 0.48));
+            bg.fillCircle(Phaser.Math.Between(0, W), Phaser.Math.Between(0, H * 0.78),
+                          Phaser.Math.FloatBetween(0.5, 1.9));
+        }
+        // 지면
+        bg.fillStyle(0x090f09, 1).fillRect(0, 612, W, 108);
+        bg.lineStyle(1, 0x182818, 0.8).lineBetween(0, 612, W, 612);
+
+        // ── 타이틀 ──────────────────────────────────────
+        // 글로우 레이어 (그림자)
+        this.add.text(W / 2 + 2, 84, 'THE SLINGSHOT TO RESCUE WORLD', {
+            fontFamily: '"Arial Black", Arial', fontSize: '44px', color: '#042e28'
+        }).setOrigin(0.5);
+
+        const titleT = this.add.text(W / 2, 82, 'THE SLINGSHOT TO RESCUE WORLD', {
+            fontFamily: '"Arial Black", Arial', fontSize: '44px', color: '#4af0c8'
+        }).setOrigin(0.5).setAlpha(0);
+
+        const subT = this.add.text(W / 2, 148, '세상을 구하는 새 총', {
+            fontFamily: '"Arial Black", Arial', fontSize: '29px', color: '#e8e8e8'
+        }).setOrigin(0.5).setAlpha(0);
+
+        const divG = this.add.graphics().setAlpha(0);
+        divG.lineStyle(1, 0x4af0c8, 0.35).lineBetween(380, 190, 900, 190);
+
+        // ── 인트로 BGM 시작 ─────────────────────────────────
+        playBgm(this, 'introMusic');
+
+        // 타이틀 등장 애니메이션
+        this.cameras.main.fadeIn(900, 0, 0, 0);
+        this.time.delayedCall(250, () => {
+            this.tweens.add({ targets: titleT, alpha: 1, y: 78, duration: 750, ease: 'Power2' });
+            this.tweens.add({
+                targets: titleT, alpha: { from: 0.82, to: 1 },
+                duration: 2000, yoyo: true, repeat: -1, ease: 'Sine.easeInOut', delay: 900
+            });
+        });
+        this.time.delayedCall(560, () => {
+            this.tweens.add({ targets: subT,  alpha: 1, duration: 500 });
+            this.tweens.add({ targets: divG,  alpha: 1, duration: 600 });
+        });
+
+        // ── 새총 애니메이션 ─────────────────────────────
+        this.sX  = 170;  this.sY  = 520;           // 새총 중심
+        this.pL  = { x: 148, y: 496 };             // 왼쪽 갈래
+        this.pR  = { x: 192, y: 496 };             // 오른쪽 갈래
+
+        const slg = this.add.graphics();
+        slg.lineStyle(14, 0x8B4513, 1).lineBetween(this.sX, this.sY + 20, this.sX, 612);
+        slg.lineStyle(10, 0x8B4513, 1);
+        slg.lineBetween(this.sX, this.sY + 10, this.pL.x, this.pL.y);
+        slg.lineBetween(this.sX, this.sY + 10, this.pR.x, this.pR.y);
+        slg.lineStyle(2, 0x5c2a0a, 0.35);
+        for (let y = this.sY + 30; y < 610; y += 20)
+            slg.lineBetween(this.sX - 5, y, this.sX + 5, y + 4);
+
+        this.bandG = this.add.graphics().setDepth(1);
+
+        // 돌멩이
+        this.stone   = this.add.circle(this.sX, this.sY, 9, 0x95a5a6).setDepth(2);
+        this.stoneHL = this.add.circle(this.sX - 3, this.sY - 3, 3, 0xddeedd, 0.65).setDepth(3);
+
+        // 목표 새 (사각형 실루엣 + 눈)
+        this.birdBody = this.add.rectangle(820, 318, 38, 22, 0x4a2c2c).setDepth(1);
+        this.birdBody.birdVX = -58;
+        this.birdEye  = this.add.circle(834, 311, 5, 0xff3030).setDepth(2);
+
+        this.fxG = this.add.graphics().setDepth(5);
+
+        // 첫 발사 대기
+        this.time.delayedCall(900, () => this.pullBack());
+
+        // ── 메뉴 버튼 ───────────────────────────────────
+        const menuDefs = [
+            { label: 'GAME  START', y: 348, size: '40px', col: '#39ff14', hover: '#aaff44', cb: () => this.startGame()           },
+            { label: '순 위  보 기', y: 416, size: '27px', col: '#e8a030', hover: '#ffdd66', cb: () => this.openRanking()         },
+            { label: 'SETTING',     y: 474, size: '27px', col: '#888888', hover: '#eeeeee', cb: () => this.openModal('setting')  },
+            { label: 'CREDIT',      y: 528, size: '27px', col: '#888888', hover: '#eeeeee', cb: () => this.openModal('credit')   },
+        ];
+
+        menuDefs.forEach((d, i) => {
+            const btn = this.add.text(W / 2, d.y + 30, d.label, {
+                fontFamily: '"Arial Black", Arial', fontSize: d.size,
+                color: d.col, stroke: '#000000', strokeThickness: 3
+            }).setOrigin(0.5).setAlpha(0).setInteractive({ useHandCursor: true });
+            btn.on('pointerover', () => { if (!this.modalOpen) btn.setColor(d.hover); });
+            btn.on('pointerout',  () => { if (!this.modalOpen) btn.setColor(d.col);   });
+            btn.on('pointerup',   () => { if (!this.modalOpen) d.cb();                });
+            this.time.delayedCall(980 + i * 160, () => {
+                this.tweens.add({ targets: btn, alpha: 1, y: d.y, duration: 420, ease: 'Back.easeOut' });
+            });
+        });
+
+        // ── DEV MODE 버튼 (우하단, 작게) ────────────────
+        const devBtn = this.add.text(W - 24, H - 16, '[ DEV MODE ]', {
+            fontFamily: 'Courier New, monospace', fontSize: '13px', color: '#334433'
+        }).setOrigin(1, 1).setInteractive({ useHandCursor: true });
+        devBtn.on('pointerover', () => devBtn.setColor('#44ff88'));
+        devBtn.on('pointerout',  () => devBtn.setColor('#334433'));
+        devBtn.on('pointerup',   () => { if (!this.modalOpen) this.openDevMode(); });
+
+        // ── 하단 크레딧 ─────────────────────────────────
+        this.add.text(W / 2, 712, 'Developed by  Karona Games', {
+            fontFamily: 'Arial', fontSize: '14px', color: '#2a3c3c'
+        }).setOrigin(0.5, 1);
+    }
+
+    // ── 새총 당기기 ──────────────────────────────────────
+    pullBack() {
+        if (!this.stone) return;
+        this.tweens.add({
+            targets: [this.stone, this.stoneHL],
+            x: this.sX - 62, y: this.sY + 36,
+            duration: 680, ease: 'Power2.easeOut',
+            onComplete: () => this.time.delayedCall(300, () => this.release())
+        });
+    }
+
+    // ── 발사 ─────────────────────────────────────────────
+    release() {
+        if (!this.stone) return;
+        const dx = this.sX - this.stone.x, dy = this.sY - this.stone.y;
+        const ang = Math.atan2(dy, dx);
+        this.stoneVX = Math.cos(ang) * Math.hypot(dx, dy) * 7.2;
+        this.stoneVY = Math.sin(ang) * Math.hypot(dx, dy) * 7.2;
+        this.stoneFlying = true;
+    }
+
+    // ── 새 명중 이펙트 ───────────────────────────────────
+    hitEffect(x, y) {
+        if (!this.birdBody) return;
+        this.birdAlive = false;
+        this.birdBody.setVisible(false);
+        this.birdEye.setVisible(false);
+        for (let i = 0; i < 14; i++) {
+            const ang = Math.random() * Math.PI * 2;
+            const spd = 90 + Math.random() * 210;
+            this.particles.push({
+                x, y,
+                vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd - 50,
+                life: 1.0, decay: 1.0 + Math.random() * 0.6,
+                color: [0x39ff14, 0xff4444, 0xffaa00][Phaser.Math.Between(0, 2)],
+                size: 3 + Math.random() * 5
+            });
+        }
+        this.birdRespawnTimer = 2.2;
+    }
+
+    update(time, delta) {
+        if (!this.stone) return;
+        const dt = delta / 1000;
+
+        // 돌멩이 비행
+        if (this.stoneFlying) {
+            this.stone.x   += this.stoneVX * dt;
+            this.stone.y   += this.stoneVY * dt;
+            this.stoneVY   += 660 * dt;
+            this.stoneHL.x  = this.stone.x - 3;
+            this.stoneHL.y  = this.stone.y - 3;
+
+            // 새 명중 판정
+            if (this.birdAlive && this.birdBody && this.birdBody.visible) {
+                if (Math.hypot(this.stone.x - this.birdBody.x, this.stone.y - this.birdBody.y) < 34) {
+                    this.hitEffect(this.birdBody.x, this.birdBody.y);
+                    this.stone.setPosition(this.sX, this.sY);
+                    this.stoneHL.setPosition(this.sX - 3, this.sY - 3);
+                    this.stoneFlying = false;
+                    this.time.delayedCall(1400, () => this.pullBack());
+                }
+            }
+            // 화면 밖으로
+            if (this.stone.x > 1420 || this.stone.y > 820) {
+                this.stone.setPosition(this.sX, this.sY);
+                this.stoneHL.setPosition(this.sX - 3, this.sY - 3);
+                this.stoneFlying = false;
+                this.time.delayedCall(1100, () => this.pullBack());
+            }
+        }
+
+        // 새 이동
+        if (this.birdBody && this.birdAlive) {
+            this.birdBody.x += this.birdBody.birdVX * dt;
+            this.birdEye.x   = this.birdBody.x + 14;
+            this.birdEye.y   = this.birdBody.y - 6;
+            if (this.birdBody.x < 440)  this.birdBody.birdVX =  Math.abs(this.birdBody.birdVX);
+            if (this.birdBody.x > 1080) this.birdBody.birdVX = -Math.abs(this.birdBody.birdVX);
+        }
+
+        // 새 리스폰
+        if (!this.birdAlive) {
+            this.birdRespawnTimer -= dt;
+            if (this.birdRespawnTimer <= 0) {
+                this.birdAlive = true;
+                const nx = Phaser.Math.Between(480, 950), ny = Phaser.Math.Between(270, 420);
+                this.birdBody.setPosition(nx, ny).setVisible(true);
+                this.birdEye.setPosition(nx + 14, ny - 6).setVisible(true);
+            }
+        }
+
+        // 고무줄
+        this.bandG.clear();
+        if (!this.stoneFlying) {
+            this.bandG.lineStyle(4, 0xD2691E, 1);
+            this.bandG.lineBetween(this.pL.x, this.pL.y, this.stone.x, this.stone.y);
+            this.bandG.lineBetween(this.pR.x, this.pR.y, this.stone.x, this.stone.y);
+        }
+
+        // 파티클
+        if (this.particles.length > 0) {
+            this.fxG.clear();
+            this.particles = this.particles.filter(p => {
+                p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 380 * dt;
+                p.life -= p.decay * dt;
+                if (p.life <= 0) return false;
+                this.fxG.fillStyle(p.color, p.life)
+                         .fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+                return true;
+            });
+        }
+    }
+
+    // ── 게임 시작 ────────────────────────────────────────
+    // ── 개발자 모드 패시브 선택 패널 ─────────────────────
+    openDevMode() {
+        if (this.devPanel) { this.devPanel.destroy(true); this.devPanel = null; }
+        this.modalOpen = true;
+
+        const W = 1280, H = 720;
+        const panel = this.add.container(0, 0).setDepth(80);
+        this.devPanel = panel;
+
+        // 어두운 배경
+        panel.add(this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0.88));
+
+        // 제목 + 부제 (한 줄로 압축)
+        panel.add(this.add.text(W / 2, 38, '🛠  DEV MODE  —  강화 직접 설정', {
+            fontFamily: 'Courier New, monospace', fontSize: '20px', color: '#44ff88',
+            stroke: '#000', strokeThickness: 3
+        }).setOrigin(0.5));
+        panel.add(this.add.text(W / 2, 62, '※ 실제 게임: 기증 후 랜덤 선택', {
+            fontFamily: 'Arial', fontSize: '10px', color: '#445544'
+        }).setOrigin(0.5));
+
+        // 패시브 정의 (name / 최대 스택 / 등급 / 설명)
+        const DEFS = [
+            { name: '탄성증가',  max: 3, rarity: 'NORMAL', desc: '발사력 ×1.2 (스택당)',         get: () => armMuscleStack,   set: v => { armMuscleStack  = v; launchMult = BASE_LAUNCH * Math.pow(1.2, v); } },
+            { name: '파워업',  max: 3, rarity: 'NORMAL', desc: '공격력 ×2 (스택당)',            get: () => ironBallStack,    set: v => { ironBallStack   = v; } },
+            { name: '돌을 줍다', max: 3, rarity: 'NORMAL', desc: '즉시 +2 돌멩이 (1회성)',       get: () => pickupStoneStack, set: v => { pickupStoneStack = v; } },
+            { name: '큰돌',   max: 3, rarity: 'RARE',   desc: '크기 ×2 + 공격력 ×2 (스택당)',  get: () => bigStoneStack,    set: v => { bigStoneStack   = v; } },
+            { name: '조준선', max: 2, rarity: 'RARE',   desc: '궤적 표시 (2=100%)',            get: () => aimLineStack,    set: v => { aimLineStack    = v; } },
+            { name: '농구공', max: 2, rarity: 'RARE',   desc: '1스택=1바운드 / 2=2바운드',     get: () => basketballStack, set: v => { basketballStack = v; } },
+            { name: '자석탄', max: 1, rarity: 'RARE',   desc: '정점에서 가장 가까운 적으로 유도', get: () => magnetStack,     set: v => { magnetStack     = v; } },
+            { name: '관통',   max: 1, rarity: 'EPIC',   desc: '무한 관통 (1스택)',             get: () => piercingStack,   set: v => { piercingStack   = v; } },
+            { name: '산탄',   max: 1, rarity: 'EPIC',   desc: '3방향 동시 발사 (±20°)',        get: () => shotgunStack,    set: v => { shotgunStack    = v; } },
+            { name: '폭발',   max: 1, rarity: 'EPIC',   desc: '명중 시 반경 130px 폭발',       get: () => explosionStack,  set: v => { explosionStack  = v; } },
+            { name: '번개탄', max: 1, rarity: 'EPIC',   desc: '0.5초마다 반경 160px 번개 공격',   get: () => lightningStack,  set: v => { lightningStack  = v; } },
+        ];
+
+        const rarityColor = { NORMAL: '#aaaaaa', RARE: '#44bbff', EPIC: '#aa44ff' };
+        const rowY0 = 110;   // 압축: 150 → 110
+        const rowH  = 56;    // 압축: 74 → 56
+        const lblX  = 260, stackX = 640, btnW = 34;
+
+        // 컬럼 헤더
+        panel.add(this.add.text(lblX,      rowY0 - 22, '강화', { fontFamily: 'Arial', fontSize: '11px', color: '#555' }).setOrigin(0, 0.5));
+        panel.add(this.add.text(stackX,    rowY0 - 22, '스택',   { fontFamily: 'Arial', fontSize: '11px', color: '#555' }).setOrigin(0.5, 0.5));
+        panel.add(this.add.text(lblX + 30, rowY0 - 22, '설명',   { fontFamily: 'Arial', fontSize: '11px', color: '#555' }).setOrigin(0, 0.5));
+
+        // 구분선
+        const div = this.add.graphics();
+        div.lineStyle(1, 0x334433, 0.7).lineBetween(190, rowY0 - 11, 1090, rowY0 - 11);
+        panel.add(div);
+
+        const stackTexts = [];
+
+        DEFS.forEach((def, i) => {
+            const cy = rowY0 + i * rowH;
+            const col = rarityColor[def.rarity];
+
+            // 등급 뱃지
+            panel.add(this.add.text(210, cy, def.rarity, {
+                fontFamily: 'Arial', fontSize: '10px', color: '#000',
+                backgroundColor: col, padding: { x: 5, y: 2 }
+            }).setOrigin(0.5));
+
+            // 패시브 이름
+            panel.add(this.add.text(lblX, cy, def.name, {
+                fontFamily: '"Arial Black", Arial', fontSize: '18px', color: col
+            }).setOrigin(0, 0.5));
+
+            // 설명
+            panel.add(this.add.text(lblX + 110, cy + 9, def.desc, {
+                fontFamily: 'Arial', fontSize: '11px', color: '#777'
+            }).setOrigin(0, 0.5));
+
+            // ─ 버튼
+            const minusBtn = this.add.text(stackX - btnW - 18, cy, '[ - ]', {
+                fontFamily: 'Courier New', fontSize: '16px', color: '#ff6666'
+            }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+
+            // 스택 숫자
+            const stackTxt = this.add.text(stackX, cy, `${def.get()} / ${def.max}`, {
+                fontFamily: '"Arial Black", Arial', fontSize: '18px', color: '#ffffff'
+            }).setOrigin(0.5);
+            stackTexts.push(stackTxt);
+
+            // + 버튼
+            const plusBtn = this.add.text(stackX + btnW + 18, cy, '[ + ]', {
+                fontFamily: 'Courier New', fontSize: '16px', color: '#44ff88'
+            }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+
+            panel.add([minusBtn, stackTxt, plusBtn]);
+
+            const refresh = () => stackTxt.setText(`${def.get()} / ${def.max}`);
+
+            minusBtn.on('pointerover', () => minusBtn.setColor('#ffaaaa'));
+            minusBtn.on('pointerout',  () => minusBtn.setColor('#ff6666'));
+            minusBtn.on('pointerup',   () => {
+                if (def.get() > 0) { def.set(Math.max(0, def.get() - 1)); refresh(); }
+            });
+            plusBtn.on('pointerover', () => plusBtn.setColor('#aaffcc'));
+            plusBtn.on('pointerout',  () => plusBtn.setColor('#44ff88'));
+            plusBtn.on('pointerup',   () => {
+                if (def.get() < def.max) { def.set(Math.min(def.max, def.get() + 1)); refresh(); }
+            });
+        });
+
+        // ── 게임 시작 버튼 (우측 하단) ──────────────────
+        const startBg = this.add.rectangle(W - 150, H - 44, 240, 50, 0x39ff14)
+            .setInteractive({ useHandCursor: true });
+        const startTxt = this.add.text(W - 150, H - 44, '▶  STAGE 1  시작', {
+            fontFamily: '"Arial Black", Arial', fontSize: '18px', color: '#000000'
+        }).setOrigin(0.5);
+        startBg.on('pointerover', () => startBg.setFillStyle(0xaaffaa));
+        startBg.on('pointerout',  () => startBg.setFillStyle(0x39ff14));
+        startBg.on('pointerup',   () => {
+            panel.destroy(true);
+            this.devPanel  = null;
+            this.modalOpen = false;
+            // DEV MODE 에서 설정한 패시브들 → 토글 ON으로 초기화
+            Object.keys(passiveActive).forEach(k => delete passiveActive[k]);
+            const devNames  = ['탄성증가','파워업','돌을 줍다','큰돌','조준선','농구공','관통','자석탄','산탄','폭발','번개탄'];
+            const devStacks = [armMuscleStack, ironBallStack, pickupStoneStack,
+                               bigStoneStack, aimLineStack, basketballStack, piercingStack,
+                               magnetStack, shotgunStack, explosionStack, lightningStack];
+            devNames.forEach((n, i) => { if (devStacks[i] > 0) passiveActive[n] = true; });
+            this.startGame();
+        });
+        panel.add([startBg, startTxt]);
+
+        // ── 닫기 버튼 ────────────────────────────────────
+        const closeBtn = this.add.text(W - 30, 24, '✕', {
+            fontFamily: 'Arial Black', fontSize: '22px', color: '#666'
+        }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+        closeBtn.on('pointerover', () => closeBtn.setColor('#ffffff'));
+        closeBtn.on('pointerout',  () => closeBtn.setColor('#666666'));
+        closeBtn.on('pointerup',   () => {
+            // 패시브 초기화 (취소 시 원상복구)
+            armMuscleStack = 0; bigStoneStack = 0; ironBallStack = 0;
+            aimLineStack   = 0; piercingStack = 0; basketballStack = 0;
+            shotgunStack  = 0; magnetStack = 0; explosionStack = 0; pickupStoneStack = 0; lightningStack = 0;
+            launchMult = BASE_LAUNCH;
+            Object.keys(passiveActive).forEach(k => delete passiveActive[k]);
+            panel.destroy(true);
+            this.devPanel  = null;
+            this.modalOpen = false;
+        });
+        panel.add(closeBtn);
+    }
+
+    startGame() {
+        // 인트로 BGM 볼륨 페이드아웃 (700ms, setInterval 방식 — tween 미지원 우회)
+        if (currentBgm) {
+            const fadeDuration = 700;
+            const steps = 14;
+            const interval = fadeDuration / steps;
+            const startVol = currentBgm.volume;   // 현재 실제 볼륨 기준으로 페이드
+            const volStep  = startVol / steps;
+            let stepCount  = 0;
+            const introEl  = currentBgm;           // 페이드할 인트로 엘리먼트 고정 참조
+            bgmFadeTimer = setInterval(() => {
+                stepCount++;
+                const nextVol = Math.max(0, startVol - volStep * stepCount);
+                introEl.volume = nextVol;
+                if (stepCount >= steps) {
+                    clearInterval(bgmFadeTimer);
+                    bgmFadeTimer = null;
+                    introEl.pause();
+                    introEl.currentTime = 0;
+                    // currentBgm은 이미 게임 BGM으로 교체됐을 수 있으므로 건드리지 않음
+                }
+            }, interval);
+        }
+        this.cameras.main.fadeOut(700, 0, 0, 0);
+        this.cameras.main.once('camerafadeoutcomplete', () => this.scene.start('GameScene'));
+    }
+
+    // ── 순위 보기 모달 ───────────────────────────────────
+    openRanking() {
+        if (this.modalOpen) return;
+        this.modalOpen = true;
+        const W = this.W, H = this.H;
+        const modal = this.add.container(0, 0).setDepth(100);
+
+        // 어두운 배경
+        const dimBg = this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0.88).setInteractive();
+        modal.add(dimBg);
+
+        // 패널
+        const PW = 860, PH = 510;
+        const PX = W / 2 - PW / 2, PY = H / 2 - PH / 2;
+        const pg = this.add.graphics();
+        pg.fillStyle(0x0c1a28, 1).fillRoundedRect(PX, PY, PW, PH, 20);
+        pg.lineStyle(2, 0xe8a030, 1).strokeRoundedRect(PX, PY, PW, PH, 20);
+        modal.add(pg);
+
+        // 타이틀
+        modal.add(this.add.text(W / 2, PY + 40, '🏆  역대 순위', {
+            fontFamily: '"Arial Black", Arial', fontSize: '28px', color: '#e8a030'
+        }).setOrigin(0.5));
+
+        // 구분선
+        const div1 = this.add.graphics();
+        div1.lineStyle(1, 0x4a3010, 1).lineBetween(PX + 40, PY + 72, PX + PW - 40, PY + 72);
+        modal.add(div1);
+
+        // 순위 데이터
+        const scores  = getScores();
+        const colX    = [PX + 52, PX + 152, PX + 380, PX + 560, PX + 710];
+        const headers = ['순위', '이름', '처치 수', '라운드', '날짜'];
+        const hY      = PY + 96;
+
+        headers.forEach((h, i) => {
+            modal.add(this.add.text(colX[i], hY, h, {
+                fontFamily: '"Arial Black", Arial', fontSize: '14px', color: '#aaaaaa'
+            }).setOrigin(0, 0.5));
+        });
+
+        const div2 = this.add.graphics();
+        div2.lineStyle(1, 0x333333, 1).lineBetween(PX + 40, hY + 20, PX + PW - 40, hY + 20);
+        modal.add(div2);
+
+        if (scores.length === 0) {
+            modal.add(this.add.text(W / 2, H / 2 + 20, '아직 기록이 없습니다.\n게임을 플레이하고 이름을 남겨보세요!', {
+                fontFamily: 'Arial', fontSize: '17px', color: '#555555', align: 'center', lineSpacing: 6
+            }).setOrigin(0.5));
+        } else {
+            scores.slice(0, 8).forEach((s, idx) => {
+                const ry  = hY + 36 + idx * 38;
+                const medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `${idx + 1}위`;
+                const rowG = this.add.graphics();
+                rowG.fillStyle(idx % 2 === 0 ? 0x111111 : 0x0a0a0a, 0.55)
+                    .fillRect(PX + 40, ry - 15, PW - 80, 34);
+                modal.add(rowG);
+
+                const tc = idx < 3 ? '#ffffff' : '#aaaaaa';
+                modal.add(this.add.text(colX[0], ry, medal,            { fontFamily: 'Arial',        fontSize: '17px', color: tc }).setOrigin(0, 0.5));
+                modal.add(this.add.text(colX[1], ry, s.name,           { fontFamily: '"Arial Black"', fontSize: '17px', color: tc }).setOrigin(0, 0.5));
+                modal.add(this.add.text(colX[2], ry, `${s.kills}마리`, { fontFamily: 'Arial',        fontSize: '17px', color: tc }).setOrigin(0, 0.5));
+                modal.add(this.add.text(colX[3], ry, `R${s.round}`,    { fontFamily: 'Arial',        fontSize: '17px', color: tc }).setOrigin(0, 0.5));
+                modal.add(this.add.text(colX[4], ry, s.date,           { fontFamily: 'Arial',        fontSize: '13px', color: '#666666' }).setOrigin(0, 0.5));
+            });
+        }
+
+        // 닫기 버튼
+        const closeBtn = this.add.text(W / 2, PY + PH - 38, '  닫  기  ', {
+            fontFamily: '"Arial Black", Arial', fontSize: '19px', color: '#aabbcc',
+            backgroundColor: '#162230', padding: { x: 22, y: 10 }
+        }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+        closeBtn.on('pointerover', () => closeBtn.setColor('#ffffff'));
+        closeBtn.on('pointerout',  () => closeBtn.setColor('#aabbcc'));
+        closeBtn.on('pointerup',   () => { modal.destroy(true); this.modalOpen = false; });
+        modal.add(closeBtn);
+    }
+
+    // ── 모달 (SETTING / CREDIT) ──────────────────────────
+    openModal(type) {
+        if (this.modalOpen) return;
+        this.modalOpen = true;
+        const W = this.W, H = this.H;
+        const modal = this.add.container(0, 0).setDepth(100);
+
+        const dimBg = this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0.8).setInteractive();
+        modal.add(dimBg);
+
+        const pg = this.add.graphics();
+        pg.fillStyle(0x0c1a28, 1).fillRoundedRect(W / 2 - 270, H / 2 - 190, 540, 380, 18);
+        pg.lineStyle(2, 0x4af0c8, 1).strokeRoundedRect(W / 2 - 270, H / 2 - 190, 540, 380, 18);
+        modal.add(pg);
+
+        modal.add(this.add.text(W / 2, H / 2 - 148, type === 'setting' ? 'SETTING' : 'CREDIT', {
+            fontFamily: '"Arial Black", Arial', fontSize: '30px', color: '#4af0c8'
+        }).setOrigin(0.5));
+
+        // ── SETTING: 볼륨 슬라이더 ──────────────────────
+        let onMove = null, onUp = null;
+        if (type === 'setting') {
+            let activeSlideFn = null;
+            onMove = (ptr) => { if (ptr.isDown && activeSlideFn) activeSlideFn(ptr.x); };
+            onUp   = ()    => { activeSlideFn = null; };
+            this.input.on('pointermove', onMove);
+            this.input.on('pointerup',   onUp);
+
+            modal.add(this.add.text(W / 2, H / 2 - 88, '볼륨 설정', {
+                fontFamily: '"Arial Black", Arial', fontSize: '18px', color: '#aabbcc'
+            }).setOrigin(0.5));
+
+            this.makeSlider(modal, W / 2, H / 2 - 38, 340, bgmVolume, 'BGM 볼륨', (val) => {
+                bgmVolume = val;
+                if (currentBgm) currentBgm.volume = bgmVolume;  // HTMLAudioElement
+            }, (fn) => { activeSlideFn = fn; });
+
+            this.makeSlider(modal, W / 2, H / 2 + 48, 340, sfxVolume, 'SFX 볼륨', (val) => {
+                sfxVolume = val;
+            }, (fn) => { activeSlideFn = fn; });
+
+            modal.add(this.add.text(W / 2, H / 2 + 115, '* SFX는 향후 업데이트에서 적용됩니다', {
+                fontFamily: 'Arial', fontSize: '13px', color: '#445566'
+            }).setOrigin(0.5));
+
+        // ── CREDIT ──────────────────────────────────────
+        } else {
+            const creditLines = [
+                'THE SLINGSHOT TO RESCUE WORLD',
+                '세상을 구하는 새 총',
+                '',
+                'Game Design & Development',
+                'Karona Games',
+                '',
+                'Engine  ·  Phaser 3.60.0',
+                'Art  ·  TBD  ·  BGM  ·  TBD',
+            ];
+            creditLines.forEach((line, i) => {
+                const big = ['THE SLINGSHOT TO RESCUE WORLD', '세상을 구하는 새 총', 'Karona Games'].includes(line);
+                modal.add(this.add.text(W / 2, H / 2 - 95 + i * 30, line, {
+                    fontFamily: 'Arial', fontSize: big ? '18px' : '15px',
+                    color: big ? '#ffffff' : '#667788', fontStyle: big ? 'bold' : 'normal'
+                }).setOrigin(0.5));
+            });
+        }
+
+        // ── 닫기 버튼 ────────────────────────────────────
+        const closeBtn = this.add.text(W / 2, H / 2 + 152, '  닫  기  ', {
+            fontFamily: '"Arial Black", Arial', fontSize: '19px', color: '#aabbcc',
+            backgroundColor: '#162230', padding: { x: 22, y: 10 }
+        }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+        closeBtn.on('pointerover', () => closeBtn.setColor('#ffffff'));
+        closeBtn.on('pointerout',  () => closeBtn.setColor('#aabbcc'));
+        closeBtn.on('pointerup', () => {
+            if (onMove) this.input.off('pointermove', onMove);
+            if (onUp)   this.input.off('pointerup',   onUp);
+            modal.destroy(true);
+            this.modalOpen = false;
+        });
+        modal.add(closeBtn);
+    }
+
+    // ── 볼륨 슬라이더 헬퍼 ──────────────────────────────
+    // onchange(value) : 값 변경 콜백
+    // setActiveDrag(fn) : 전역 드래그 핸들러 등록 콜백
+    makeSlider(modal, cx, cy, trackW, initVal, label, onchange, setActiveDrag) {
+        const scene = this;
+
+        // 라벨
+        modal.add(scene.add.text(cx - trackW / 2, cy - 22, label, {
+            fontFamily: '"Arial Black", Arial', fontSize: '15px', color: '#7a9aaa'
+        }).setOrigin(0, 0.5));
+
+        // 퍼센트 표시
+        const valTxt = scene.add.text(cx + trackW / 2 + 16, cy, `${Math.round(initVal * 100)}%`, {
+            fontFamily: '"Arial Black", Arial', fontSize: '15px', color: '#4af0c8'
+        }).setOrigin(0, 0.5);
+        modal.add(valTxt);
+
+        // 트랙 배경
+        modal.add(scene.add.rectangle(cx, cy, trackW, 6, 0x1e3446));
+
+        // 채움 바 (왼쪽 기준 origin)
+        let curVal = initVal;
+        const fill = scene.add.rectangle(
+            cx - trackW / 2, cy,
+            Math.max(trackW * curVal, 1), 6, 0x4af0c8
+        ).setOrigin(0, 0.5);
+        modal.add(fill);
+
+        // 핸들
+        const handle = scene.add.circle(cx - trackW / 2 + trackW * curVal, cy, 11, 0xffffff);
+        const handleRing = scene.add.circle(cx - trackW / 2 + trackW * curVal, cy, 7, 0x4af0c8);
+        modal.add(handle);
+        modal.add(handleRing);
+
+        // 업데이트 함수
+        const updateSlider = (ptrX) => {
+            const relX = Phaser.Math.Clamp(ptrX - (cx - trackW / 2), 0, trackW);
+            curVal = relX / trackW;
+            fill.setSize(Math.max(relX, 1), 6);
+            handle.x   = cx - trackW / 2 + relX;
+            handleRing.x = cx - trackW / 2 + relX;
+            valTxt.setText(`${Math.round(curVal * 100)}%`);
+            onchange(curVal);
+        };
+
+        // 트랙 히트 영역 (클릭 + 드래그)
+        const track = scene.add.rectangle(cx, cy, trackW + 22, 34, 0x000000, 0)
+            .setInteractive({ useHandCursor: true });
+        track.on('pointerdown', (ptr) => {
+            setActiveDrag(updateSlider);
+            updateSlider(ptr.x);
+        });
+        modal.add(track);
+    }
+}
+
+// ─── preload ──────────────────────────────────────────
+function preload() {
+    const sg = this.make.graphics({ add: false });
+    sg.fillStyle(0x95a5a6, 1).fillCircle(15, 15, 15);
+    sg.fillStyle(0x7f8c8d, 1).fillCircle(10, 10, 8);
+    sg.generateTexture('stone', 30, 30);
+    sg.destroy();
+
+    const mg = this.make.graphics({ add: false });
+    mg.fillStyle(0x34495e, 1).fillRect(0, 10, 50, 30);
+    mg.fillStyle(0x2c3e50, 1).fillRect(15, 0, 20, 10).fillRect(15, 40, 20, 10);
+    mg.fillStyle(0x39ff14, 1).fillCircle(40, 25, 6);
+    mg.generateTexture('mechBird', 50, 50);
+    mg.destroy();
+
+    const rg = this.make.graphics({ add: false });
+    rg.fillStyle(0x4a2c2c, 1).fillRect(0, 10, 50, 30);
+    rg.fillStyle(0x3a2020, 1).fillRect(15, 0, 20, 10).fillRect(15, 40, 20, 10);
+    rg.fillStyle(0xff2020, 1).fillCircle(40, 25, 7);
+    rg.fillStyle(0xff8888, 1).fillCircle(40, 25, 3);
+    rg.generateTexture('redBird', 50, 50);
+    rg.destroy();
+
+    const dg = this.make.graphics({ add: false });
+    dg.fillStyle(0x445566, 1).fillRect(18, 18, 14, 14);
+    dg.fillStyle(0x556677, 1);
+    dg.fillRect(4, 22, 14, 6).fillRect(32, 22, 14, 6);
+    dg.fillRect(22, 4, 6, 14).fillRect(22, 32, 6, 14);
+    dg.fillStyle(0x7799bb, 1);
+    dg.fillCircle(6, 6, 6).fillCircle(44, 6, 6);
+    dg.fillCircle(6, 44, 6).fillCircle(44, 44, 6);
+    dg.fillStyle(0x00ccff, 1).fillCircle(25, 25, 3);
+    dg.generateTexture('droneBird', 50, 50);
+    dg.destroy();
+
+    // 나방 (지상 근처 약한 적)
+    const mothg = this.make.graphics({ add: false });
+    // 날개 (연한 황갈색)
+    mothg.fillStyle(0xd4bc8a, 0.92);
+    mothg.fillTriangle(25, 26,  1,  6,  1, 42);   // 왼쪽 날개
+    mothg.fillTriangle(25, 26, 49,  6, 49, 42);   // 오른쪽 날개
+    mothg.fillStyle(0xaa9966, 0.75);
+    mothg.fillTriangle(25, 26,  7, 14,  7, 36);   // 왼쪽 날개 안쪽
+    mothg.fillTriangle(25, 26, 43, 14, 43, 36);   // 오른쪽 날개 안쪽
+    // 날개 무늬 점
+    mothg.fillStyle(0x887744, 1);
+    mothg.fillCircle(10, 24, 3).fillCircle(40, 24, 3);
+    // 몸통
+    mothg.fillStyle(0x776655, 1);
+    mothg.fillRect(23,  9, 4, 32);
+    // 더듬이
+    mothg.lineStyle(1, 0x554433, 1);
+    mothg.lineBetween(25, 10, 15, 1).lineBetween(25, 10, 35, 1);
+    mothg.generateTexture('mothBird', 50, 50);
+    mothg.destroy();
+
+    // 부유 생물체 (원거리 보상 — 젤리피시 형태)
+    const floatG = this.make.graphics({ add: false });
+    floatG.fillStyle(0xbb44ff, 0.22).fillEllipse(25, 20, 46, 36);  // 후광
+    floatG.fillStyle(0x9922dd, 0.82).fillEllipse(25, 18, 30, 22);  // 본체 돔
+    floatG.fillStyle(0xdd88ff, 0.55).fillEllipse(25, 15, 18, 13);  // 내부
+    floatG.fillStyle(0xffffff, 0.88).fillCircle(25, 12, 4);        // 발광 코어
+    floatG.lineStyle(1.5, 0xcc66ff, 0.65);                         // 촉수
+    floatG.lineBetween(17, 28, 13, 45);
+    floatG.lineBetween(20, 29, 17, 47);
+    floatG.lineBetween(25, 30, 25, 48);
+    floatG.lineBetween(30, 29, 33, 47);
+    floatG.lineBetween(33, 28, 37, 45);
+    floatG.generateTexture('floater', 50, 50);
+    floatG.destroy();
+
+    // 독수리 (고도 4 강적 — HP 2, 큰 날개)
+    const eg = this.make.graphics({ add: false });
+    eg.fillStyle(0x1a1200, 1);
+    eg.fillTriangle(25, 27,  0,  6,  8, 44);   // 왼쪽 날개
+    eg.fillTriangle(25, 27, 50,  6, 42, 44);   // 오른쪽 날개
+    eg.fillStyle(0x2e2000, 0.85);
+    eg.fillTriangle(25, 27,  5, 12, 12, 38);
+    eg.fillTriangle(25, 27, 45, 12, 38, 38);
+    eg.fillStyle(0x0d0d0d, 1).fillEllipse(25, 30, 14, 26);
+    eg.fillStyle(0x1a1a1a, 1).fillCircle(25, 15, 9);
+    eg.fillStyle(0xff2200, 1).fillCircle(25, 14, 4);
+    eg.fillStyle(0xffffff, 1).fillCircle(25, 14, 1.5);
+    eg.fillStyle(0xe8a800, 1).fillTriangle(23, 13, 27, 13, 25, 5);
+    eg.generateTexture('eagle', 50, 50);
+    eg.destroy();
+
+    // 고공 오염체 — 촉수형 (70×70, HP 3)
+    const tng = this.make.graphics({ add: false });
+    // 몸통 외곽 글로우 (어두운 보라)
+    tng.fillStyle(0x1a0d2e, 0.45).fillEllipse(35, 50, 64, 42);
+    // 촉수 7개 — 몸통보다 먼저 그려서 몸통이 위에 덮임
+    tng.lineStyle(2.2, 0x3d2a5c, 0.92);
+    [11, 19, 27, 35, 43, 51, 59].forEach((rx) => {
+        let px = rx, py = 37;
+        for (let s = 0; s < 5; s++) {
+            const nx = px + (s % 2 === 0 ? 5 : -5);
+            const ny = py - 7;
+            tng.lineBetween(px, py, nx, ny);
+            px = nx; py = ny;
+        }
+    });
+    // 촉수 끝부분 발광점 (희미한 보라)
+    tng.fillStyle(0x7733cc, 0.45);
+    [16, 24, 32, 40, 48, 56, 64].forEach(ex => tng.fillCircle(ex, 3, 2));
+    // 몸통 본체 (어두운 자주-검정)
+    tng.fillStyle(0x0f0a1e, 1).fillEllipse(35, 50, 50, 30);
+    tng.fillStyle(0x0c0815, 1).fillEllipse(35, 51, 36, 20);
+    // 표면 불규칙 반점
+    tng.fillStyle(0x1e1232, 0.75).fillCircle(25, 47, 5).fillCircle(44, 49, 4).fillCircle(35, 44, 3);
+    // 눈 (붉게 빛남)
+    tng.fillStyle(0xaa0000, 1).fillCircle(27, 50, 4.5).fillCircle(43, 50, 4.5);
+    tng.fillStyle(0xff3333, 1).fillCircle(27, 50, 2.5).fillCircle(43, 50, 2.5);
+    tng.fillStyle(0xff9999, 1).fillCircle(27, 49, 1).fillCircle(43, 49, 1);
+    tng.generateTexture('tendril', 70, 70);
+    tng.destroy();
+
+    // 부유 오염 기지 — 오버로드형 (90×90, HP 5, 고정 부유)
+    const ovg = this.make.graphics({ add: false });
+    // 외곽 글로우 (어두운 올리브)
+    ovg.fillStyle(0x0e1a06, 0.28).fillEllipse(45, 44, 86, 66);
+    // 상단 혹 4개 (등 돌기 — 오버로드 특유)
+    ovg.fillStyle(0x0d1408, 1);
+    ovg.fillCircle(20, 27, 10).fillCircle(35, 17, 9).fillCircle(55, 17, 9).fillCircle(70, 27, 10);
+    // 메인 몸통 돔
+    ovg.fillStyle(0x131c09, 1).fillEllipse(45, 43, 72, 54);
+    // 몸통 내부 막 질감 (얇아서 살짝 밝은 부분)
+    ovg.fillStyle(0x1d2a0f, 0.7).fillEllipse(45, 39, 54, 38);
+    ovg.fillStyle(0x243312, 0.38).fillEllipse(45, 34, 36, 24);
+    // 배면 (아랫면 어두운 막)
+    ovg.fillStyle(0x0a0f06, 0.88).fillEllipse(45, 63, 62, 22);
+    // 몸통 막 혈관 (가는 선)
+    ovg.lineStyle(1.2, 0x0a1006, 0.6);
+    ovg.lineBetween(45, 22, 28, 54);
+    ovg.lineBetween(45, 22, 45, 57);
+    ovg.lineBetween(45, 22, 62, 54);
+    // 아래 촉수 6개
+    ovg.lineStyle(3, 0x0c1509, 1);
+    [18, 28, 38, 52, 62, 72].forEach((rx) => {
+        let px = rx, py = 60;
+        for (let s = 0; s < 4; s++) {
+            const nx = px + (s % 2 === 0 ? 5 : -5);
+            const ny = py + 6;
+            ovg.lineBetween(px, py, nx, ny);
+            px = nx; py = ny;
+        }
+    });
+    // 눈 (주황색 발광, 작지만 뚜렷)
+    ovg.fillStyle(0xbb4400, 1).fillEllipse(31, 39, 14, 9).fillEllipse(59, 39, 14, 9);
+    ovg.fillStyle(0xff7722, 1).fillEllipse(31, 39, 7, 5).fillEllipse(59, 39, 7, 5);
+    ovg.fillStyle(0xffcc88, 0.8).fillCircle(31, 38, 2).fillCircle(59, 38, 2);
+    ovg.generateTexture('overlord', 90, 90);
+    ovg.destroy();
+
+}
+
+// ─── create ───────────────────────────────────────────
+function create() {
+    // 물리 월드 범위 — 세로를 축소하여 Arcade physics 연산 비용 절감
+    this.physics.world.setBounds(0, -1200, WORLD_W, 2200);
+    this.cameras.main.setBounds(0, WORLD_TOP, WORLD_LIMIT_X + 80, WORLD_H);
+    this.cameras.main.centerOn(SLING_CENTER.x, CAM_HOME_Y);
+    this.cameras.main.setRoundPixels(true);  // 서브픽셀 렌더링 OFF → 카메라 흔들림 제거
+
+    // ─── 배경 레이어: 우주 ~ 하늘 ~ 산 ~ 흙 ─────────────────
+    // 반투명 레이어를 겹쳐 색이 자연스럽게 섞이도록 함
+    const worldBg = this.add.graphics().setDepth(-2);
+    worldBg.fillStyle(0x02040e, 1   ).fillRect(0, WORLD_TOP, WORLD_W, 4500);  // 심우주 (base)
+    worldBg.fillStyle(0x060e28, 0.80).fillRect(0, -3800,     WORLD_W, 2100);  // 어두운 하늘
+    worldBg.fillStyle(0x0e1c4a, 0.75).fillRect(0, -2000,     WORLD_W, 1300);  // 밤하늘
+    worldBg.fillStyle(0x1e3a8a, 0.68).fillRect(0, -900,      WORLD_W, 750);   // 진한 파란 하늘
+    worldBg.fillStyle(0x3468b8, 0.62).fillRect(0, -220,      WORLD_W, 440);   // 하늘
+    worldBg.fillStyle(0x5a90cc, 0.56).fillRect(0,  160,      WORLD_W, 280);   // 밝은 하늘
+    worldBg.fillStyle(0x4a7830, 0.90).fillRect(0,  380,      WORLD_W, 310);   // 산/숲 녹지
+    worldBg.fillStyle(0x7a5030, 1   ).fillRect(0,  680,      WORLD_W, 80);    // 흙 표층
+    worldBg.fillStyle(0x4a2e18, 1   ).fillRect(0,  760,      WORLD_W, 250);   // 지하
+
+    // 원거리 산 능선 — 코사인 다중합성으로 부드러운 곡선 생성
+    const mtFar = this.add.graphics().setDepth(-1);
+    mtFar.fillStyle(0x1c4a1e, 0.72);
+    const farPts = [{ x: 0, y: 492 }];
+    for (let i = 0; i <= 400; i++) {
+        const t = i / 400;
+        const x = t * WORLD_W;
+        const h = 220 * (0.5 + 0.5 * Math.cos(t * 2 * Math.PI * 3  + 0.70))
+                +  90 * (0.5 + 0.5 * Math.cos(t * 2 * Math.PI * 7  + 1.30))
+                +  38 * (0.5 + 0.5 * Math.cos(t * 2 * Math.PI * 13 + 0.55));
+        farPts.push({ x, y: 492 - h });
+    }
+    farPts.push({ x: WORLD_W, y: 492 });
+    mtFar.fillPoints(farPts, true);
+
+    // 근거리 산/언덕 능선 — 더 크고 선명한 곡선
+    const mtNear = this.add.graphics().setDepth(-1);
+    mtNear.fillStyle(0x2a5c1e, 0.84);
+    const nearPts = [{ x: 0, y: 662 }];
+    for (let i = 0; i <= 400; i++) {
+        const t = i / 400;
+        const x = t * WORLD_W;
+        const h = 175 * (0.5 + 0.5 * Math.cos(t * 2 * Math.PI * 4  + 1.10))
+                +  68 * (0.5 + 0.5 * Math.cos(t * 2 * Math.PI * 9  + 2.30))
+                +  28 * (0.5 + 0.5 * Math.cos(t * 2 * Math.PI * 16 + 0.90));
+        nearPts.push({ x, y: 662 - h });
+    }
+    nearPts.push({ x: WORLD_W, y: 662 });
+    mtNear.fillPoints(nearPts, true);
+
+    // 지표면 라인
+    const soilLine = this.add.graphics().setDepth(0);
+    soilLine.lineStyle(2, 0x5a3520, 0.6).lineBetween(0, 680, WORLD_LIMIT_X, 680);
+
+    // ─── 세계 끝 절벽 (WORLD_LIMIT_X) ────────────────────
+    const cliff = this.add.graphics().setDepth(3);
+    // 절벽 뒤 허공 (칠흑)
+    cliff.fillStyle(0x020100, 1).fillRect(WORLD_LIMIT_X + 45, WORLD_TOP, WORLD_W, WORLD_H);
+    // 절벽 단면 — 3레이어로 입체감
+    cliff.fillStyle(0x6b3d1e, 1).fillRect(WORLD_LIMIT_X,      WORLD_TOP, 22, WORLD_H); // 표면 (밝음)
+    cliff.fillStyle(0x3d200a, 1).fillRect(WORLD_LIMIT_X + 22, WORLD_TOP, 14, WORLD_H); // 중간
+    cliff.fillStyle(0x1a0d03, 1).fillRect(WORLD_LIMIT_X + 36, WORLD_TOP, 9,  WORLD_H); // 그림자
+    // 절벽 위 경고 라인
+    cliff.lineStyle(2, 0xff4400, 0.55).lineBetween(WORLD_LIMIT_X - 2, 80, WORLD_LIMIT_X - 2, 700);
+
+    activeStones = this.physics.add.group({ maxSize: 20 });
+    birds        = this.physics.add.group();
+
+    // 새총 거치대 (월드 공간)
+    const stand = this.add.graphics();
+    stand.lineStyle(12, 0x8B4513, 1);
+    stand.lineBetween(SLING_CENTER.x, SLING_CENTER.y, SLING_CENTER.x, 720);
+    stand.lineStyle(10, 0x8B4513, 1);
+    stand.lineBetween(SLING_CENTER.x, SLING_CENTER.y, PRONG_L.x, PRONG_L.y);
+    stand.lineBetween(SLING_CENTER.x, SLING_CENTER.y, PRONG_R.x, PRONG_R.y);
+
+    trajectoryGraphics = this.add.graphics();
+    rubberBandGraphics = this.add.graphics();
+    hpBarGraphics      = this.add.graphics().setDepth(5);
+    minimapGraphics    = this.add.graphics().setScrollFactor(0).setDepth(20);
+
+    // HUD — setScrollFactor(0) 으로 카메라 이동/줌에 고정
+    uiRoundText = this.add.text(640, 18, 'ROUND 1', {
+        fontFamily: 'Arial Black', fontSize: '22px', color: '#a09060'
+    }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(10);
+
+    // uiScoreText 제거 — '처치한 방사능 새' 텍스트 삭제 (직관적 정보로 대체됨)
+
+    uiAmmoText = this.add.text(640, 48, `남은 돌멩이: ${MAX_AMMO} / ${MAX_AMMO}`, {
+        fontFamily: 'Arial Black', fontSize: '24px', color: '#e8e0c8'
+    }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(10);
+
+    // uiPassiveText — 좌측 플레이어 패널과 중복이므로 화면 밖 보관 (참조 유지)
+    uiPassiveText = this.add.text(-9999, -9999, '', {
+        fontFamily: 'Arial', fontSize: '18px', color: '#c8960a'
+    }).setOrigin(0, 1).setScrollFactor(0).setDepth(10).setAlpha(0);
+
+    // ─── 박사님 연구 버튼 (우상단 최상단 — HUD 고정) ─────
+    // 배경 그래픽 (반짝이는 테두리 패널)
+    uiResearchBtn = this.add.graphics().setScrollFactor(0).setDepth(10);
+    // 텍스트
+    uiResearchBtnTxt = this.add.text(1200, 20, '🔬  박사님 연구', {
+        fontFamily: 'Arial Black', fontSize: '15px', color: '#ffdd44',
+        stroke: '#000000', strokeThickness: 3,
+        shadow: { offsetX: 0, offsetY: 0, color: '#ffaa00', blur: 8, fill: true }
+    }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(11).setInteractive({ useHandCursor: true });
+    // 버튼 배경 그리기 함수 (활성/비활성 공용)
+    uiResearchBtn._draw = (active) => {
+        uiResearchBtn.clear();
+        const bx = 1260, by = 18, bw = 148, bh = 28;
+        if (active) {
+            uiResearchBtn.fillStyle(0x2a1800, 1).fillRoundedRect(bx - bw, by, bw, bh, 6);
+            uiResearchBtn.lineStyle(2, 0xffcc44, 1).strokeRoundedRect(bx - bw, by, bw, bh, 6);
+            // 내부 은은한 글로우
+            uiResearchBtn.lineStyle(4, 0xffaa00, 0.25).strokeRoundedRect(bx - bw - 2, by - 2, bw + 4, bh + 4, 8);
+        } else {
+            uiResearchBtn.fillStyle(0x1a1208, 1).fillRoundedRect(bx - bw, by, bw, bh, 6);
+            uiResearchBtn.lineStyle(1, 0x443311, 1).strokeRoundedRect(bx - bw, by, bw, bh, 6);
+        }
+    };
+    uiResearchBtn._draw(false);
+    uiResearchBtnTxt.on('pointerover', () => {
+        if (materialStock + roundMaterial >= 10) {
+            uiResearchBtn.clear();
+            const bx = 1260, by = 18, bw = 148, bh = 28;
+            uiResearchBtn.fillStyle(0x3d2200, 1).fillRoundedRect(bx - bw, by, bw, bh, 6);
+            uiResearchBtn.lineStyle(2, 0xffee88, 1).strokeRoundedRect(bx - bw, by, bw, bh, 6);
+            uiResearchBtn.lineStyle(6, 0xffcc44, 0.35).strokeRoundedRect(bx - bw - 3, by - 3, bw + 6, bh + 6, 10);
+        }
+    });
+    uiResearchBtnTxt.on('pointerout', () => updateResearchBtn());
+    uiResearchBtnTxt.on('pointerup', () => {
+        const total       = materialStock + roundMaterial;
+        const stoneFlying = activeStones && activeStones.countActive(true) > 0;
+        if (total >= 10 && !uiOverlay && !stoneFlying) {
+            materialStock += roundMaterial;
+            roundMaterial  = 0;
+            refreshMaterialHUD();
+            showDonationUI(sceneRef, 0, materialStock);
+        }
+    });
+
+    uiMaterialText = this.add.text(1260, 58, '보유 특수물질 : 0g', {
+        fontFamily: 'Arial Black', fontSize: '20px', color: '#e8a030'
+    }).setOrigin(1, 0).setScrollFactor(0).setDepth(10);
+
+    uiPollutionText = this.add.text(1260, 84, '지구 오염도: 10%', {
+        fontFamily: 'Arial', fontSize: '17px', color: '#ff6644'
+    }).setOrigin(1, 0).setScrollFactor(0).setDepth(10).setVisible(false);
+
+    // ─── 남은 오염 생물 카운터 (미니맵 바로 아래) ─────────
+    // MM_Y + MM_H = 276 + 158 = 434 → 아래 6px 여백 → 440
+    uiRemainingText = this.add.text(118, 440, '', {
+        fontFamily: '"Arial Black", Arial',
+        fontSize: '14px',
+        color: '#ffdd55',
+        stroke: '#000000',
+        strokeThickness: 3,
+        align: 'center'
+    }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(10);
+    refreshRemainingHUD();
+
+    // ─── Player Status 패널 (왼쪽) ────────────────────
+    uiPanelBg = this.add.graphics().setScrollFactor(0).setDepth(8);
+    uiPanelTitle = this.add.text(118, 22, '◆  플레이어 정보', {
+        fontFamily: 'Arial Black', fontSize: '15px', color: '#e8a030'
+    }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(9);
+    uiPanelContent = this.add.text(18, 52, '', {
+        fontFamily: 'Arial', fontSize: '14px', color: '#d4c090', lineSpacing: 3
+    }).setScrollFactor(0).setDepth(9);
+    drawPanelBg(1.0);
+    refreshPlayerPanel();
+
+    // ─── 미니맵 토글 버튼 (패널 바로 아래, 영구 UI) ─────────
+    uiMinimapBtnBg  = this.add.graphics().setScrollFactor(0).setDepth(9);
+    uiMinimapBtnTxt = this.add.text(118, 262, '● 미니맵  ON', {
+        fontFamily: 'Arial Black', fontSize: '14px', color: '#e8a030'
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(9);
+    drawMinimapBtn(1.0);
+    permanentHitAreas.push({
+        x: 118, y: 262, hw: 90, hh: 14,
+        cb: () => {
+            minimapVisible = !minimapVisible;
+            if (!minimapVisible) minimapGraphics.clear();
+            drawMinimapBtn(sceneRef.cameras.main.zoom);
+            uiMinimapBtnTxt.setText(minimapVisible ? '● 미니맵  ON' : '○ 미니맵  OFF');
+            uiMinimapBtnTxt.setColor(minimapVisible ? '#e8a030' : '#6a5830');
+        }
+    });
+
+    // 조준화면으로 버튼 (줌 아웃 시 화면 중앙에 표시)
+    uiAimBtn = this.add.rectangle(640, 360, 270, 58, 0x000000)
+        .setAlpha(0.5).setScrollFactor(0).setDepth(20)
+        .setStrokeStyle(2, 0xe8a030).setVisible(false);
+    uiAimBtnTxt = this.add.text(640, 360, '조준화면으로', {
+        fontFamily: 'Arial Black', fontSize: '22px', color: '#ffffff'
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(21).setVisible(false);
+
+    spawnBirdsSpread(this);
+    // 실제 소환된 수량을 총합으로 확정 (스테이지 1 기준)
+    grandTotalBirds = birds.getChildren().length;
+    remainingBirds  = grandTotalBirds;
+    refreshRemainingHUD();
+
+    this.input.on('pointerdown', startDrag, this);
+
+    // 버튼 판정: 영구 영역 → 오버레이 영역 순서로 확인 (스크린 좌표 기반)
+    this.input.on('pointerup', (pointer) => {
+        for (const area of permanentHitAreas) {
+            if (pointer.x >= area.x - area.hw && pointer.x <= area.x + area.hw &&
+                pointer.y >= area.y - area.hh && pointer.y <= area.y + area.hh) {
+                area.cb();
+                return;
+            }
+        }
+        for (const area of overlayHitAreas) {
+            if (pointer.x >= area.x - area.hw && pointer.x <= area.x + area.hw &&
+                pointer.y >= area.y - area.hh && pointer.y <= area.y + area.hh) {
+                area.cb();
+                return;
+            }
+        }
+    });
+
+    // ── 게임 BGM 시작 ───────────────────────────────────
+    playBgm(this, 'gameMusic');
+
+    sceneRef = this;
+    const canvas = this.sys.game.canvas;
+    // 브라우저 클라이언트 좌표 → 월드 좌표 변환 (카메라 스크롤 + 줌 반영)
+    const toWorldPos = (clientX, clientY) => {
+        const r   = canvas.getBoundingClientRect();
+        const cx  = (clientX - r.left) * (config.width  / r.width);
+        const cy  = (clientY - r.top)  * (config.height / r.height);
+        const cam = sceneRef.cameras.main;
+        return {
+            x: cam.scrollX + cx / cam.zoom,
+            y: cam.scrollY + cy / cam.zoom
+        };
+    };
+    window.addEventListener('mousemove', (e) => {
+        if (isDragging && currentStone) {
+            const p = toWorldPos(e.clientX, e.clientY);
+            doDragAt(p.x, p.y);
+        } else if (isMapDragging) {
+            const cam = sceneRef.cameras.main;
+            const r   = canvas.getBoundingClientRect();
+            const cx  = (e.clientX - r.left) * (config.width  / r.width);
+            const cy  = (e.clientY - r.top)  * (config.height / r.height);
+            const dx  = (cx - mapDragOriginX) / cam.zoom;
+            const dy  = (cy - mapDragOriginY) / cam.zoom;
+            cam.scrollX = Phaser.Math.Clamp(mapDragScrollX - dx, 0, WORLD_LIMIT_X - config.width / cam.zoom);
+            cam.scrollY = Phaser.Math.Clamp(mapDragScrollY - dy, WORLD_TOP, WORLD_TOP + WORLD_H - config.height / cam.zoom);
+        }
+    });
+    window.addEventListener('mouseup', (e) => {
+        if (isDragging) {
+            const p = toWorldPos(e.clientX, e.clientY);
+            doFireStone(p.x, p.y);
+        }
+        isMapDragging = false;
+    });
+
+    // 마우스 휠 줌 (평상시 전용 — 발사/팔로우 중에는 비활성)
+    canvas.addEventListener('wheel', (e) => {
+        if (isDragging || cameraFollowing) return;
+        const cam = sceneRef.cameras.main;
+        const delta = e.deltaY > 0 ? -0.05 : 0.05;
+        const newZoom = Phaser.Math.Clamp(cam.zoom + delta, 0.5, 1.0);
+        // 화면 중심점 유지하며 scroll 재계산
+        const cx = cam.scrollX + config.width  / (2 * cam.zoom);
+        const cy = cam.scrollY + config.height / (2 * cam.zoom);
+        cam.setZoom(newZoom);
+        cam.scrollX = cx - config.width  / (2 * newZoom);
+        cam.scrollY = cy - config.height / (2 * newZoom);
+            setAimBtnVisible(newZoom < 1.0);
+        e.preventDefault();
+    }, { passive: false });
+
+    this.physics.add.overlap(activeStones, birds, hitBird, null, this);
+    // DEV MODE 로 시작 시 이미 패시브가 있으면 즉시 패널 라인 생성
+    rebuildPassiveLines(this);
+    showMissionOverlay(this);
+}
+
+// ─── update ───────────────────────────────────────────
+function update(time, delta) {
+    // 새 이동 범위 경계 — 타입별로 구간 분리
+    birds.getChildren().forEach(b => {
+        if (!b.active) return;
+        const key    = b.texture && b.texture.key;
+        const isFloater  = key === 'floater';
+        const isTendril  = key === 'tendril';
+        const maxX = isFloater ? 4000 : isTendril ? 950 : 3400;
+        const minX = key === 'mothBird' ? 330 : isFloater ? 2000 : isTendril ? 300 : 800;
+        if (b.x > maxX && b.body.velocity.x > 0) b.setVelocityX(-Math.abs(b.body.velocity.x));
+        if (b.x < minX && b.body.velocity.x < 0) b.setVelocityX( Math.abs(b.body.velocity.x));
+    });
+
+    // 돌멩이 — 농구공 바운스 + 월드 이탈 처리
+    activeStones.getChildren().forEach(s => {
+        if (!s.active) return;
+
+        // ── 자석탄: 정점 감지 → 락온 → 끝까지 열추적 ──────────────────────────────
+        if (magnetStack > 0 && isOn('자석탄') && !s.settled) {
+
+            // ① 정점 통과 시 가장 가까운 적 락온 (1회)
+            if (!s.magnetFired && s.body.velocity.y > 60) {
+                s.magnetFired = true;
+                let nearest = null, nearDist = Infinity;
+                birds.getChildren().forEach(b => {
+                    if (!b.active) return;
+                    const d = Phaser.Math.Distance.Between(s.x, s.y, b.x, b.y);
+                    if (d < nearDist) { nearDist = d; nearest = b; }
+                });
+                if (nearest) {
+                    s.magnetTarget = nearest;
+                    // 락온 비주얼
+                    if (sceneRef) {
+                        const ring = sceneRef.add.graphics().setDepth(8).setPosition(s.x, s.y);
+                        ring.lineStyle(4, 0x44ccff, 1).strokeCircle(0, 0, 14);
+                        sceneRef.tweens.add({ targets: ring, scaleX: 5, scaleY: 5, alpha: 0,
+                            duration: 320, ease: 'Cubic.Out', onComplete: () => ring.destroy() });
+                        const beam = sceneRef.add.graphics().setDepth(7);
+                        beam.lineStyle(2, 0x88eeff, 0.7)
+                            .lineBetween(s.x, s.y, nearest.x, nearest.y);
+                        sceneRef.tweens.add({ targets: beam, alpha: 0, duration: 250,
+                            onComplete: () => beam.destroy() });
+                    }
+                }
+            }
+
+            // ② 락온 중 — 매 프레임 조향 (열추적 미사일)
+            if (s.magnetTarget) {
+                if (!s.magnetTarget.active) {
+                    // 타깃 사망 → 추적 해제, 중력 복원
+                    s.magnetTarget = null;
+                    s.body.setGravityY(0);
+                } else {
+                    // 타임아웃: 4초 이상 추적해도 미명중 시 포기 (게임 멈춤 방지)
+                    s.magnetTrackTime = (s.magnetTrackTime || 0) + delta;
+                    if (s.magnetTrackTime > 4000) {
+                        s.magnetTarget    = null;
+                        s.magnetTrackTime = 0;
+                        s.body.setGravityY(0);
+                    } else {
+                        s.body.setGravityY(-600);   // 중력 상쇄
+
+                        // ── 재타격 쿨다운 (관통 + 자석탄 조합 시 hitBirds 맴돌기 방지) ──
+                        // 관통 패시브로 돌이 살아남은 채 같은 적을 추적할 때,
+                        // hitBirds가 재타격을 막아 영구 맴돌기→팅겨나가는 버그를 수정.
+                        // 350ms마다 추적 타깃의 hitBirds 기록을 지워 재타격 허용.
+                        s.magnetHitCooldown = (s.magnetHitCooldown ?? 0) - delta;
+                        if (s.magnetHitCooldown <= 0) {
+                            if (s.hitBirds) s.hitBirds.delete(s.magnetTarget);
+                            s.magnetHitCooldown = 350;
+                        }
+
+                        const tDist = Phaser.Math.Distance.Between(
+                            s.x, s.y, s.magnetTarget.x, s.magnetTarget.y);
+
+                        // ── 근접 속도 제한 (충돌체 통과 후 역방향 진동 방지) ──
+                        // 80px 이내에서는 거리에 비례해 속도를 줄여 충돌 감지를 보장.
+                        const rawSpeed = Math.max(
+                            Math.sqrt(s.body.velocity.x ** 2 + s.body.velocity.y ** 2), 580);
+                        const speed = tDist < 80
+                            ? Math.min(rawSpeed, Math.max(140, tDist * 4))
+                            : rawSpeed;
+
+                        const toAngle = Math.atan2(
+                            s.magnetTarget.y - s.y, s.magnetTarget.x - s.x);
+
+                        if (tDist < 120) {
+                            // ── 근접: 회전 제한 없이 타깃 직접 조준 (궤도 탈출)
+                            s.body.setVelocity(
+                                Math.cos(toAngle) * speed,
+                                Math.sin(toAngle) * speed);
+                        } else {
+                            // ── 원거리: 부드러운 조향
+                            const nowAngle = Math.atan2(s.body.velocity.y, s.body.velocity.x);
+                            let diff = toAngle - nowAngle;
+                            while (diff >  Math.PI) diff -= 2 * Math.PI;
+                            while (diff < -Math.PI) diff += 2 * Math.PI;
+                            const newAngle = nowAngle + Math.max(-0.14, Math.min(0.14, diff));
+                            s.body.setVelocity(
+                                Math.cos(newAngle) * speed,
+                                Math.sin(newAngle) * speed);
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── 농구공 패시브: 지면 도달 시 튀어오름 ─────
+        if (basketballStack > 0 && isOn('농구공')) {
+            if (s.y >= GROUND_Y && s.body.velocity.y > 10
+                    && s.bounceCount < basketballStack && !s.settled) {
+                s.bounceCount++;
+                s.setY(GROUND_Y - 4);
+                s.body.setVelocityY(-Math.abs(s.body.velocity.y) * 0.85);
+                if (sceneRef) {
+                    sceneRef.cameras.main.shake(60, 0.006);
+                    spawnGroundImpact(sceneRef, s.x);
+                }
+            }
+        }
+
+        // ── 일반 지면 착지: 스쿼시 → 굴러가다 페이드 아웃 ─
+        if (!s.settled && s.y >= GROUND_Y && s.body.velocity.y > 10
+                && !(basketballStack > 0 && isOn('농구공') && s.bounceCount < basketballStack)) {
+            const slideVX = s.body.velocity.x;   // ← 착지 순간 수평 속도 포착
+            s.settled = true;
+            s.setY(GROUND_Y - s.displayHeight * 0.5);
+            s.body.setVelocity(0, 0);
+            s.body.allowGravity = false;
+            if (sceneRef) {
+                sceneRef.cameras.main.shake(75, 0.007);
+                spawnGroundImpact(sceneRef, s.x);
+
+                // ── 폭발 패시브: 착지 시에도 발동 ──
+                if (explosionStack > 0 && isOn('폭발')) {
+                    spawnGroundExplosion(sceneRef, s.x, s.y, s);
+                }
+
+                const rollDist = Phaser.Math.Clamp(slideVX * 0.45, -340, 340);
+                const rollDur  = 650 + Math.abs(rollDist) * 2.0;
+                const spinDeg  = rollDist * 2.8;
+
+                // 착지 순간 스쿼시 — 약하고 짧게 (돌은 고무공이 아님)
+                sceneRef.tweens.add({
+                    targets: s,
+                    scaleX: s.scaleX * 1.28,
+                    scaleY: s.scaleY * 0.80,
+                    duration: 55, yoyo: true, ease: 'Sine.Out',
+                });
+
+                // 스쿼시와 동시에 굴러가며 페이드 아웃 (delay 없음)
+                sceneRef.tweens.add({
+                    targets: s,
+                    x:     s.x + rollDist,
+                    angle: s.angle + spinDeg,
+                    alpha: 0,
+                    duration: rollDur,
+                    ease: 'Quad.Out',
+                    onComplete: () => {
+                        if (s.active) activeStones.killAndHide(s);
+                        s.setAlpha(1); s.setAngle(0);
+                        updateResearchBtn();
+                    }
+                });
+            }
+        }
+
+        // ── 번개탄: 2초마다 주변 오염생물 번개 공격 ─────────────────────────────
+        if (lightningStack > 0 && isOn('번개탄') && !s.settled) {
+            s.lightningTimer = (s.lightningTimer || 0) + delta;
+            if (s.lightningTimer >= 500) {
+                s.lightningTimer = 0;
+                const BOLT_R = 160;
+                const sx = s.x, sy = s.y;
+                // 피해
+                birds.getChildren().slice().forEach(b => {
+                    if (!b.active) return;
+                    if (Phaser.Math.Distance.Between(sx, sy, b.x, b.y) > BOLT_R) return;
+                    b.hp = (b.hp ?? 1) - STONE_DAMAGE;
+                    if (b.hp <= 0) {
+                        const bx2 = b.x, by2 = b.y, mat2 = b.materialValue ?? 10, bk2 = b.texture?.key;
+                        b.destroy();
+                        roundBirdsHit++; roundMaterial += mat2; totalBirdsHit++;
+                        remainingBirds = Math.max(0, remainingBirds - 1);
+                        refreshMaterialHUD(); refreshRemainingHUD(); refreshPlayerPanel();
+                        showKillFx(sceneRef, bx2, by2, mat2, bk2);
+                    } else {
+                        sceneRef.tweens.add({ targets: b, alpha: 0.1, duration: 50,
+                            yoyo: true, repeat: 2, onComplete: () => { if (b?.active) b.setAlpha(1); } });
+                    }
+                });
+                // 번개 비주얼
+                spawnLightningFx(sceneRef, sx, sy, BOLT_R);
+                // 번개 처치 후 라운드 클리어 체크
+                if (remainingBirds <= 0 && !isRoundEnding) {
+                    isRoundEnding = true;
+                    sceneRef.time.delayedCall(900, () => showRoundClear(sceneRef), [], sceneRef);
+                }
+            }
+        }
+
+        // 월드 이탈 (지면 아래로 빠진 경우 / 오른쪽 벽)
+        if (s.y > 820 || s.x > WORLD_LIMIT_X) {
+            activeStones.killAndHide(s);
+        }
+    });
+
+    // ── 수동 scroll lerp (줌 없음 — 프레임드랍 원인 제거)
+    if (cameraFollowing) {
+        const flying = activeStones.getChildren().filter(s => s.active);
+        const cam = this.cameras.main;
+        if (flying.length > 0) {
+            const target = flying.reduce((a, b) =>
+                Phaser.Math.Distance.Between(b.x, b.y, SLING_CENTER.x, SLING_CENTER.y) >
+                Phaser.Math.Distance.Between(a.x, a.y, SLING_CENTER.x, SLING_CENTER.y) ? b : a
+            );
+            const tx = Phaser.Math.Clamp(target.x - config.width  / 2, 0, WORLD_LIMIT_X - config.width);
+            const ty = Phaser.Math.Clamp(
+                target.y - CAM_FOLLOW_OFFSET_Y - config.height / 2,
+                WORLD_TOP, WORLD_TOP + WORLD_H - config.height
+            );
+            cam.scrollX = Phaser.Math.Linear(cam.scrollX, tx, 0.1);
+            cam.scrollY = Phaser.Math.Linear(cam.scrollY, ty, 0.1);
+        }
+        if (!isRoundEnding && activeStones.countActive(true) === 0) {
+            cameraFollowing = false;
+            sceneRef.time.delayedCall(2000, () => wipeReturn(sceneRef, () => loadStone(sceneRef)));
+        }
+    }
+
+    drawHpBars();
+    drawRubberBand();
+    compensateHUDZoom();
+
+    // 미니맵은 4프레임마다 갱신 (성능 최적화)
+    minimapFrame++;
+    if (minimapFrame % 4 === 0) drawMinimap();
+}
+
+// ─── 새 스폰 ──────────────────────────────────────────
+function spawnBird(scene, withFade = false, fixedX = null, forcedType = null) {
+    const type = forcedType ?? BIRD_TYPES[Phaser.Math.Between(0, BIRD_TYPES.length - 1)];
+    const x = fixedX !== null ? fixedX : Phaser.Math.Between(500, 2500);
+    const zoneY = type.zoneY ?? [80, 260];
+    const y = Phaser.Math.Between(zoneY[0], zoneY[1]);
+    const bird = birds.create(x, y, type.key);
+    bird.setScale(type.key === 'eagle'    ? 0.72
+                : type.key === 'tendril'  ? 1.05
+                : type.key === 'overlord' ? 1.15
+                : 0.5);
+    bird.body.allowGravity = false;
+    bird.materialValue = type.material;
+    bird.hp    = type.hp ?? 1;
+    bird.maxHp = type.hp ?? 1;
+    if (withFade) bird.setAlpha(0);
+
+    const spd = Phaser.Math.Between(type.speedMin, type.speedMax);
+    bird.setVelocityX(Phaser.Math.Between(0, 1) ? spd : -spd);
+    const floatAmt = type.key === 'mothBird' ? Phaser.Math.Between(-8, 8)
+                   : type.key === 'eagle'   ? Phaser.Math.Between(-30, 30)
+                   : type.key === 'floater' ? Phaser.Math.Between(-55, 55)
+                   : type.key === 'tendril'  ? Phaser.Math.Between(-18, 18)
+                   : type.key === 'overlord' ? Phaser.Math.Between(-4, 4)
+                   : Phaser.Math.Between(-20, 20);
+    const floatDur = type.key === 'mothBird' ? Phaser.Math.Between(300, 600)
+                   : type.key === 'eagle'    ? Phaser.Math.Between(800, 1600)
+                   : type.key === 'floater'  ? Phaser.Math.Between(1800, 3200)
+                   : type.key === 'tendril'  ? Phaser.Math.Between(1600, 2800)
+                   : type.key === 'overlord' ? Phaser.Math.Between(3000, 5000)
+                   : Phaser.Math.Between(1000, 2000);
+    scene.tweens.add({ targets: bird, y: y + floatAmt, duration: floatDur, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+    if (withFade) scene.tweens.add({ targets: bird, alpha: 1, duration: 400 });
+
+}
+
+// 패시브가 현재 활성 상태인지 (보유 + 토글 ON)
+function isOn(name) { return passiveActive[name] !== false; }
+
+// 패시브 토글 라인 재구성 — 패시브 획득·토글 클릭·재시작 시 호출
+// • 스탯(공격력·탄성)을 "── 강화 ──" 바로 아래에 표시
+// • 뱃지([N]/[R]/[E])와 이름을 별도 텍스트 오브젝트로 분리하여 색상 구분
+function rebuildPassiveLines(scene) {
+    uiPassiveLines.forEach(o => o.destroy());
+    uiPassiveLines = [];
+
+    const STACK_OF = { '탄성증가': armMuscleStack,  '큰돌':      bigStoneStack,
+                       '파워업':   ironBallStack,   '조준선':    aimLineStack,
+                       '농구공':   basketballStack, '관통':      piercingStack,
+                       '자석탄':   magnetStack,     '돌을 줍다': pickupStoneStack,
+                       '산탄':     shotgunStack,    '폭발':      explosionStack,
+                       '번개탄':   lightningStack };
+    const owned = Object.keys(STACK_OF).filter(k => STACK_OF[k] > 0);
+
+    const PASSIVE_RARITY = {
+        '탄성증가': 'NORMAL', '파워업': 'NORMAL', '돌을 줍다': 'NORMAL',
+        '큰돌':   'RARE',   '조준선': 'RARE',   '농구공':   'RARE', '자석탄': 'RARE',
+        '관통':   'EPIC',   '산탄':   'EPIC',   '폭발':     'EPIC', '번개탄': 'EPIC',
+    };
+    const PANEL_BADGE = { NORMAL: '[N]', RARE: '[R]', EPIC: '[E]' };
+    const PANEL_COL   = { NORMAL: '#aaaaaa', RARE: '#44bbff', EPIC: '#cc66ff' };
+
+    const LINE_H = 17;
+    const BASE_Y = 103;   // "── 강화 ──" 헤더 직후 y
+    let   row    = 0;
+
+    // 텍스트 생성 헬퍼 — _hx, _hy, _fs 저장 (compensateHUDZoom 에서 사용)
+    const addTxt = (sx, sy, label, style, fs) => {
+        const o = scene.add.text(sx, sy, label, style).setScrollFactor(0).setDepth(10);
+        o._hx = sx;  o._hy = sy;  o._fs = fs;
+        uiPassiveLines.push(o);
+        return o;
+    };
+
+    // ── 현재 스탯 (공격력 / 탄성) ────────────────────────
+    if (owned.length > 0) {
+        const atkMult = STONE_DAMAGE * Math.pow(2,
+            (isOn('파워업') ? ironBallStack : 0) + (isOn('큰돌') ? bigStoneStack : 0));
+        const elastX  = (launchMult / BASE_LAUNCH).toFixed(2);
+
+        addTxt(18, BASE_Y + row * LINE_H,
+            `⚔  공격력  ${atkMult}`,
+            { fontFamily: 'Arial', fontSize: '12px', color: '#ffcc44' }, 12);
+        row++;
+
+        addTxt(18, BASE_Y + row * LINE_H,
+            `↗  탄성   ×${elastX}`,
+            { fontFamily: 'Arial', fontSize: '12px', color: '#66ddff' }, 12);
+        row++;
+    }
+
+    // ── 패시브 라인 (뱃지 + 이름 분리) ────────────────────
+    owned.forEach(name => {
+        const on       = isOn(name);
+        const rarity   = PASSIVE_RARITY[name] ?? 'NORMAL';
+        const badgeStr = PANEL_BADGE[rarity]   ?? '[N]';
+        const tierCol  = PANEL_COL[rarity]     ?? '#aaaaaa';
+        const stackStr = name === '관통' ? '' : ` ×${STACK_OF[name]}`;
+        const lineY    = BASE_Y + row * LINE_H;
+
+        // 뱃지 — 티어 색상
+        const badgeObj = addTxt(18, lineY, badgeStr, {
+            fontFamily: 'Arial', fontSize: '11px',
+            color: on ? tierCol : '#444444',
+        }, 11);
+
+        // 이름 — 흰색(ON) / 어두운(OFF), 클릭 가능
+        const nameLabel = `${on ? '☑' : '☐'} ${name}${stackStr}`;
+        const nameObj   = addTxt(40, lineY, nameLabel, {
+            fontFamily: 'Arial', fontSize: '13px',
+            color: on ? '#e8e8e8' : '#555555',
+        }, 13);
+        nameObj.setInteractive({ useHandCursor: true });
+        nameObj.on('pointerup',   () => { passiveActive[name] = !isOn(name); rebuildPassiveLines(scene); });
+        nameObj.on('pointerover', () => { badgeObj.setAlpha(0.65); nameObj.setAlpha(0.65); });
+        nameObj.on('pointerout',  () => { badgeObj.setAlpha(1.0);  nameObj.setAlpha(1.0);  });
+
+        row++;
+    });
+
+    // ── 패널 높이 동적 조정 ───────────────────────────────
+    // BASE_Y=103 에서 시작, row개 행, +12px 하단 여백
+    _panelH = Math.max(240, BASE_Y + row * LINE_H + 12 - 8);
+
+    // 헤더(STAGE N / 강화 구분선) 갱신 + 패널 배경 재렌더
+    refreshPlayerPanel(owned.length > 0);
+}
+
+function getStoneScale() {
+    return 0.5 * Math.pow(2, (isOn('큰돌') ? bigStoneStack : 0));
+}
+
+// 새들을 x=1000-3200 구역에 균등하게 산포 (스테이지별 수량은 STAGE_DATA 참조)
+function spawnBirdsSpread(scene, withFade = false) {
+    const stage = STAGE_DATA[Math.min(roundNumber, STAGE_DATA.length) - 1];
+    const { birdCount, mothCount, eagleCount, overlordCount } = stage;
+
+    const minX = 1000, maxX = 3200;
+    const step = (maxX - minX) / birdCount;
+    for (let i = 0; i < birdCount; i++) {
+        const jitter = Phaser.Math.Between(-Math.floor(step * 0.3), Math.floor(step * 0.3));
+        const x = Phaser.Math.Clamp(Math.floor(minX + (i + 0.5) * step + jitter), minX, maxX);
+        spawnBird(scene, withFade, x);
+    }
+    // 지상 나방 — 새총 옆부터 전 구역
+    for (let i = 0; i < mothCount; i++) {
+        const x = Phaser.Math.Between(330, 3200);
+        spawnBird(scene, withFade, x, MOTH_TYPE);
+    }
+    // 독수리 — 전 스테이지 5마리, 화면 상단 가시권
+    for (let i = 0; i < eagleCount; i++) {
+        const x = Phaser.Math.Between(400, 3200);
+        spawnBird(scene, withFade, x, EAGLE_TYPE);
+    }
+    // 부유 생물체 — 원거리 구역(x=2000~4000)에 4마리 고정
+    for (let i = 0; i < 4; i++) {
+        const x = Phaser.Math.Between(2000, 4000);
+        spawnBird(scene, withFade, x, FLOATER_TYPE);
+    }
+    // 고공 오염체 — 새총 근처 상공 2마리 고정
+    for (let i = 0; i < 2; i++) {
+        const x = Phaser.Math.Between(380, 880);
+        spawnBird(scene, withFade, x, TENDRIL_TYPE);
+    }
+    // 부유 오염 기지 (오버로드) — 맵 전역 극고공에 고정
+    for (let i = 0; i < overlordCount; i++) {
+        const x = Phaser.Math.Between(500, 3000);
+        spawnBird(scene, withFade, x, OVERLORD_TYPE);
+    }
+}
+
+// ─── 돌멩이 장전 ──────────────────────────────────────
+function loadStone(scene) {
+    if (currentAmmo <= 0) return;
+    currentStone = scene.add.image(SLING_CENTER.x, SLING_CENTER.y, 'stone').setDepth(1).setScale(getStoneScale());
+}
+
+// ─── 고무줄 렌더링 ────────────────────────────────────
+function drawRubberBand() {
+    rubberBandGraphics.clear();
+    rubberBandGraphics.lineStyle(6, 0xD2691E, 1);
+    if (!currentStone) return;
+    rubberBandGraphics.lineBetween(PRONG_L.x, PRONG_L.y, currentStone.x, currentStone.y);
+    rubberBandGraphics.lineBetween(PRONG_R.x, PRONG_R.y, currentStone.x, currentStone.y);
+}
+
+// ─── HUD 줌 보정 ──────────────────────────────────────
+// setScrollFactor(0) 은 스크롤만 무시, 줌은 그대로 영향받음.
+// zoom 이 바뀔 때만 world 위치를 역산해 보정 (매 프레임 불필요 연산 방지).
+let _lastHUDZoom = 1.0;
+let _panelH      = 240;   // 패널 배경 현재 높이 (screen px) — rebuildPassiveLines에서 동적 갱신
+function compensateHUDZoom() {
+    const z = sceneRef.cameras.main.zoom;
+    if (Math.abs(z - _lastHUDZoom) < 0.001) return;
+    _lastHUDZoom = z;
+    const cx = config.width  / 2;
+    const cy = config.height / 2;
+    const f  = (sx, sy) => ({ x: cx + (sx - cx) / z, y: cy + (sy - cy) / z });
+    let p;
+    p = f(640, 18);   uiRoundText.setPosition(p.x, p.y);
+    p = f(640, 48);   uiAmmoText.setPosition(p.x, p.y);
+    // uiPassiveText 는 숨김 상태 — 줌 보정 불필요
+    p = f(118, 440);  if (uiRemainingText) uiRemainingText.setPosition(p.x, p.y);
+    p = f(1200, 20);  if (uiResearchBtnTxt) uiResearchBtnTxt.setPosition(p.x, p.y).setFontSize(`${15 / z}px`);
+    p = f(1260, 58);  uiMaterialText.setPosition(p.x, p.y);
+    p = f(1260, 84);  if (uiPollutionText) uiPollutionText.setPosition(p.x, p.y);
+    // Player Status 패널 + 미니맵 토글 버튼
+    drawPanelBg(z);
+    p = f(118, 22); if (uiPanelTitle)   uiPanelTitle.setPosition(p.x, p.y);
+    p = f(18,  52); if (uiPanelContent) uiPanelContent.setPosition(p.x, p.y).setFontSize(`${14 / z}px`);
+    drawMinimapBtn(z);
+    p = f(118, 262); if (uiMinimapBtnTxt) uiMinimapBtnTxt.setPosition(p.x, p.y).setFontSize(`${14 / z}px`);
+    // 조준화면으로 버튼은 화면 정중앙 → 위치는 불변, 크기만 역보정
+    if (uiAimBtn) { uiAimBtn.setScale(1 / z); uiAimBtnTxt.setScale(1 / z); }
+    // 패시브 라인 줌 보정 (각 오브젝트에 저장된 _hx, _hy, _fs 사용)
+    uiPassiveLines.forEach(obj => {
+        const p2 = f(obj._hx ?? 18, obj._hy ?? 103);
+        obj.setPosition(p2.x, p2.y).setFontSize(`${(obj._fs ?? 13) / z}px`);
+    });
+}
+
+// ─── 미니맵 렌더링 (줌 보정 적용) ────────────────────
+function drawMinimap() {
+    if (!minimapVisible) return;
+    minimapGraphics.clear();
+    const cam = sceneRef.cameras.main;
+    const z   = cam.zoom;
+    const cx  = config.width / 2, cy = config.height / 2;
+
+    // 원하는 화면 좌표를 scrollFactor(0) world 좌표로 변환
+    const wx0 = cx + (MM_X       - cx) / z;
+    const wy0 = cy + (MM_Y       - cy) / z;
+    const ww  = MM_W / z;
+    const wh  = MM_H / z;
+
+    // 배경 + 테두리
+    minimapGraphics.fillStyle(0x000000, 1).fillRect(wx0, wy0, ww, wh);
+    minimapGraphics.lineStyle(1 / z, 0xe8a030, 0.50).strokeRect(wx0, wy0, ww, wh);
+
+    // 월드 좌표 → 미니맵 world 픽셀 변환
+    const toMX = wx => wx0 + ((wx - MM_WX0) / (MM_WX1 - MM_WX0)) * ww;
+    const toMY = wy => wy0 + ((wy - MM_WY0) / (MM_WY1 - MM_WY0)) * wh;
+
+    // 새총 마커
+    const sx = toMX(SLING_CENTER.x), sy = toMY(SLING_CENTER.y);
+    const ms = 4 / z;
+    minimapGraphics.fillStyle(0xD2691E, 1).fillRect(sx - ms/2, sy - ms*0.75, ms, ms * 1.5);
+
+    // 새 (독수리=주황, 부유생물체=보라, 나방=황갈색, 나머지=초록)
+    birds.getChildren().forEach(b => {
+        if (!b.active) return;
+        const mx = toMX(b.x), my = toMY(b.y);
+        if (mx >= wx0 && mx <= wx0 + ww && my >= wy0 && my <= wy0 + wh) {
+            const key     = b.texture && b.texture.key;
+            const isEagle    = key === 'eagle';
+            const isFloater  = key === 'floater';
+            const isMoth     = key === 'mothBird';
+            const isTendril  = key === 'tendril';
+            const isOverlord = key === 'overlord';
+            const col = isOverlord ? 0xff8800
+                      : isTendril  ? 0xff2222
+                      : isEagle    ? 0xff4400
+                      : isFloater  ? 0xcc44ff
+                      : isMoth     ? 0xd4bc8a : 0x39ff14;
+            const ds  = isOverlord ? 8/z : isTendril ? 6/z : isEagle ? 6/z : isFloater ? 5/z : 3/z;
+            minimapGraphics.fillStyle(col, 0.9).fillRect(mx - ds/2, my - ds/2, ds, ds);
+        }
+    });
+
+    // 비행 중인 돌멩이
+    minimapGraphics.fillStyle(0xffffff, 0.9);
+    activeStones.getChildren().forEach(s => {
+        if (!s.active) return;
+        minimapGraphics.fillCircle(toMX(s.x), toMY(s.y), 2 / z);
+    });
+
+    // 카메라 뷰 사각형 — 미니맵 경계 내로 클램핑
+    const cvX0 = toMX(cam.scrollX);
+    const cvY0 = toMY(cam.scrollY);
+    const cvX1 = cvX0 + (config.width  / cam.zoom / WORLD_LIMIT_X) * ww;
+    const cvY1 = cvY0 + (config.height / cam.zoom / (MM_WY1 - MM_WY0)) * wh;
+    const cx0c = Math.max(wx0, cvX0), cy0c = Math.max(wy0, cvY0);
+    const cx1c = Math.min(wx0 + ww, cvX1), cy1c = Math.min(wy0 + wh, cvY1);
+    if (cx1c > cx0c && cy1c > cy0c) {
+        minimapGraphics.lineStyle(1 / z, 0xffffff, 0.75)
+            .strokeRect(cx0c, cy0c, cx1c - cx0c, cy1c - cy0c);
+    }
+}
+
+// ─── HP 바 렌더링 (maxHp > 1인 새만 표시) ───────────
+function drawHpBars() {
+    hpBarGraphics.clear();
+    birds.getChildren().forEach(bird => {
+        if (!bird.active || (bird.maxHp ?? 1) <= 1) return;
+        const ratio = Math.max(0, bird.hp / bird.maxHp);
+        const _bkey = bird.texture && bird.texture.key;
+        const bw = _bkey === 'overlord' ? 76 : _bkey === 'tendril' ? 62 : 44;
+        const bh = 5;
+        const bx = bird.x - bw / 2;
+        const by = bird.y - (_bkey === 'overlord' ? 62 : _bkey === 'tendril' ? 46 : 36);
+        hpBarGraphics.fillStyle(0x222222, 0.85).fillRect(bx, by, bw, bh);
+        const col = ratio > 0.5 ? 0x44ff44 : ratio > 0.25 ? 0xffff00 : 0xff4444;
+        hpBarGraphics.fillStyle(col, 1).fillRect(bx, by, bw * ratio, bh);
+    });
+}
+
+// ─── 드래그 ───────────────────────────────────────────
+function startDrag(pointer) {
+    // 조준화면으로 버튼 클릭 감지 (스크린 좌표 기준)
+    if (uiAimBtn && uiAimBtn.visible) {
+        if (Math.abs(pointer.x - 640) < 135 && Math.abs(pointer.y - 360) < 29) {
+            returnToAimView();
+            return;
+        }
+    }
+    // 새총 근처이고 탄약 있을 때: 돌 드래그
+    // pointer.worldX/Y는 줌 상태에서 부정확할 수 있으므로 toWorldPos와 동일 공식 사용
+    const cam = sceneRef.cameras.main;
+    const wx = cam.scrollX + pointer.x / cam.zoom;
+    const wy = cam.scrollY + pointer.y / cam.zoom;
+    if (currentStone && currentAmmo > 0 && !isRoundEnding &&
+        Phaser.Math.Distance.Between(wx, wy, currentStone.x, currentStone.y) < 50) {
+        isDragging = true;
+        return;
+    }
+    // 그 외: 맵 드래그 (카메라 팬)
+    if (!cameraFollowing) {
+        isMapDragging  = true;
+        mapDragOriginX = pointer.x;
+        mapDragOriginY = pointer.y;
+        mapDragScrollX = sceneRef.cameras.main.scrollX;
+        mapDragScrollY = sceneRef.cameras.main.scrollY;
+    }
+}
+
+function doDragAt(px, py) {
+    if (!isDragging || !currentStone) return;
+
+    // 새총 중심 오른쪽으로 당기면 바다(왼쪽) 방향으로 발사됨 → 완전 차단
+    if (px > SLING_CENTER.x) {
+        currentStone.setPosition(SLING_CENTER.x, SLING_CENTER.y);
+        trajectoryGraphics.clear();
+        return;
+    }
+
+    const angle = Phaser.Math.Angle.Between(px, py, SLING_CENTER.x, SLING_CENTER.y);
+    let dist    = Phaser.Math.Distance.Between(px, py, SLING_CENTER.x, SLING_CENTER.y);
+    if (dist > BASE_DRAG) dist = BASE_DRAG;
+
+    currentStone.x = SLING_CENTER.x - Math.cos(angle) * dist;
+    currentStone.y = SLING_CENTER.y - Math.sin(angle) * dist;
+
+    // 궤적 예측선 (조준선 패시브 보유 + ON 시에만 표시)
+    trajectoryGraphics.clear();
+    if (aimLineStack > 0 && isOn('조준선')) {
+        // 탄성증가 토글 반영한 실효 발사력
+        const effMult = (armMuscleStack > 0 && isOn('탄성증가'))
+            ? BASE_LAUNCH * Math.pow(1.2, armMuscleStack) : BASE_LAUNCH;
+        const vx  = Math.cos(angle) * dist * effMult;
+        const vy  = Math.sin(angle) * dist * effMult;
+        const g   = config.physics.arcade.gravity.y;
+        const cam = sceneRef.cameras.main;
+        const visR = cam.scrollX + config.width  / cam.zoom;
+        const visB = cam.scrollY + config.height / cam.zoom;
+
+        // 1패스: 화면 내 전체 궤적 점 수집
+        const allDots = [];
+        for (let i = 0; i < 80; i++) {
+            const t  = i * 0.05;
+            const tx = SLING_CENTER.x + vx * t;
+            const ty = SLING_CENTER.y + vy * t + 0.5 * g * t * t;
+            if (tx > visR || tx < cam.scrollX || ty > visB) break;
+            allDots.push({ tx, ty });
+        }
+
+        // 2패스: 스택1=전체의 50%, 스택2=100% 표시 + 끝으로 갈수록 페이드
+        const showCount = aimLineStack >= 2 ? allDots.length : Math.ceil(allDots.length * 0.5);
+        for (let i = 0; i < showCount; i++) {
+            const alpha = aimLineStack >= 2
+                ? 0.58
+                : Math.max(0.04, 0.65 * (1 - i / showCount));
+            trajectoryGraphics.fillStyle(0x00ffff, alpha);
+            trajectoryGraphics.fillCircle(allDots[i].tx, allDots[i].ty, 3);
+        }
+    }
+}
+
+// ─── 지면 충격 파티클 (착지·바운스 공용) ────────────────
+function spawnGroundImpact(scene, x) {
+    // 흙먼지 파편 — 좌우로 튀는 작은 사각형
+    for (let i = 0; i < 6; i++) {
+        const chip = scene.add.rectangle(
+            x + Phaser.Math.Between(-10, 10),
+            GROUND_Y,
+            Phaser.Math.Between(3, 7),
+            Phaser.Math.Between(3, 7),
+            Phaser.Utils.Array.GetRandom([0xc8a060, 0xa07840, 0xe0c080, 0x806030])
+        ).setDepth(6).setOrigin(0.5, 1);
+        scene.physics.add.existing(chip);
+        chip.body.setVelocity(
+            Phaser.Math.Between(-160, 160),
+            Phaser.Math.Between(-220, -60)
+        );
+        chip.body.setGravityY(400);
+        scene.tweens.add({
+            targets: chip, alpha: 0, duration: Phaser.Math.Between(400, 700),
+            onComplete: () => chip.destroy()
+        });
+    }
+    // 충격파 링 (빠르게 퍼지다 사라짐)
+    const ring = scene.add.graphics().setDepth(6);
+    ring.lineStyle(2, 0xffd080, 0.9).strokeEllipse(x, GROUND_Y, 12, 6);
+    scene.tweens.add({
+        targets: ring,
+        scaleX: 5, scaleY: 3, alpha: 0,
+        duration: 280,
+        ease: 'Quad.Out',
+        onComplete: () => ring.destroy()
+    });
+}
+
+// ─── 착지 폭발 (폭발 패시브 — 지면 충돌 시) ──────────
+function spawnGroundExplosion(scene, gx, gy, stone) {
+    const EXPL_R = 130;
+    const dmg    = stone ? (stone.damage ?? STONE_DAMAGE) : STONE_DAMAGE;
+
+    // 범위 내 새 데미지
+    birds.getChildren().slice().forEach(b => {
+        if (!b.active) return;
+        if (Phaser.Math.Distance.Between(gx, gy, b.x, b.y) <= EXPL_R) {
+            b.hp = (b.hp ?? 1) - dmg;
+            if (b.hp <= 0) {
+                const ebx = b.x, eby = b.y;
+                const emat = b.materialValue ?? 10;
+                const ebk  = b.texture ? b.texture.key : null;
+                b.destroy();
+                roundBirdsHit++; roundMaterial += emat; totalBirdsHit++;
+                remainingBirds = Math.max(0, remainingBirds - 1);
+                refreshMaterialHUD(); refreshRemainingHUD(); refreshPlayerPanel();
+                showKillFx(sceneRef, ebx, eby, emat, ebk);
+            } else {
+                scene.tweens.add({ targets: b, alpha: 0.2, duration: 60, yoyo: true, repeat: 2,
+                    onComplete: () => { if (b && b.active) b.setAlpha(1); } });
+            }
+        }
+    });
+
+    // 비주얼 (hitBird 폭발과 동일 연출)
+    const flash = scene.add.graphics().setDepth(9).setPosition(gx, gy);
+    flash.fillStyle(0xffffff, 1).fillCircle(0, 0, 18);
+    scene.tweens.add({ targets: flash, scaleX: 2.8, scaleY: 2.8, alpha: 0,
+        duration: 160, ease: 'Quad.Out', onComplete: () => flash.destroy() });
+
+    [[0xffff99, 5, 0], [0xff9933, 4, 55], [0xff4400, 3, 110]].forEach(([col, lw, delay]) => {
+        const ring = scene.add.graphics().setDepth(8).setPosition(gx, gy);
+        ring.lineStyle(lw, col, 1).strokeCircle(0, 0, 10);
+        const ts = EXPL_R / 10;
+        scene.tweens.add({ targets: ring, scaleX: ts, scaleY: ts, alpha: 0,
+            duration: 380, delay, ease: 'Cubic.Out', onComplete: () => ring.destroy() });
+    });
+
+    for (let i = 0; i < 8; i++) {
+        const ang  = (i / 8) * Math.PI * 2;
+        const dist = EXPL_R * (0.7 + Math.random() * 0.3);
+        const spark = scene.add.graphics().setDepth(7).setPosition(gx, gy);
+        spark.fillStyle(i % 2 === 0 ? 0xff7700 : 0xffdd22, 1).fillCircle(0, 0, 5 - Math.floor(i / 3));
+        scene.tweens.add({ targets: spark,
+            x: gx + Math.cos(ang) * dist,
+            y: gy + Math.sin(ang) * dist,
+            scaleX: 0.2, scaleY: 0.2, alpha: 0,
+            duration: 420 + i * 15, ease: 'Quad.Out',
+            onComplete: () => spark.destroy() });
+    }
+
+    scene.cameras.main.shake(200, 0.018);
+
+    // 착지 폭발 처치 후 라운드 클리어 체크
+    if (remainingBirds <= 0 && !isRoundEnding) {
+        isRoundEnding = true;
+        sceneRef.time.delayedCall(900, () => showRoundClear(sceneRef), [], sceneRef);
+    }
+}
+
+// ─── 번개탄 비주얼: 프레임 밖 하늘에서 내려치는 번개 ──
+function spawnLightningFx(scene, cx, cy, radius) {
+    const cam    = scene.cameras.main;
+    // 화면 상단보다 위 — 완전히 프레임 밖에서 시작
+    const skyTop = cam.scrollY - 80;
+
+    const BOLT_COUNT = 4;
+
+    for (let i = 0; i < BOLT_COUNT; i++) {
+        // 착지 지점: 반경 내 랜덤 (첫 번째는 돌 중심)
+        const ang   = Math.random() * Math.PI * 2;
+        const dist  = (i === 0) ? 0 : Math.random() * radius * 0.8;
+        const landX = cx + Math.cos(ang) * dist;
+        const landY = cy + Math.sin(ang) * dist * 0.35;
+
+        // 시작점: 프레임 밖 상단, 착지 X에서 살짝만 벗어남
+        const startX = landX + (Math.random() - 0.5) * 18;
+        const startY = skyTop;
+
+        // 지그재그 경로 — 세그먼트 많이, 흔들림 크게
+        const SEGS = 10;
+        const pts  = [{ x: startX, y: startY }];
+        for (let j = 1; j < SEGS; j++) {
+            const t = j / SEGS;
+            pts.push({
+                x: startX + (landX - startX) * t + (Math.random() - 0.5) * 48,
+                y: startY + (landY - startY) * t,
+            });
+        }
+        pts.push({ x: landX, y: landY });
+
+        scene.time.delayedCall(i * 60, () => {
+            const g = scene.add.graphics().setDepth(9);
+
+            // 외곽: 하늘색 굵은 선
+            g.lineStyle(4, 0x44ccff, 0.9);
+            g.beginPath(); g.moveTo(pts[0].x, pts[0].y);
+            pts.slice(1).forEach(p => g.lineTo(p.x, p.y));
+            g.strokePath();
+
+            // 내심: 흰색 얇은 선
+            g.lineStyle(1.5, 0xffffff, 1);
+            g.beginPath(); g.moveTo(pts[0].x, pts[0].y);
+            pts.slice(1).forEach(p => g.lineTo(p.x, p.y));
+            g.strokePath();
+
+            // 착지 섬광
+            const impact = scene.add.graphics().setDepth(10).setPosition(landX, landY);
+            impact.fillStyle(0xffffff, 1).fillCircle(0, 0, 12);
+            impact.lineStyle(2, 0x88eeff, 1).strokeCircle(0, 0, 22);
+            scene.tweens.add({ targets: impact, scaleX: 2.8, scaleY: 2.8, alpha: 0,
+                duration: 220, ease: 'Quad.Out', onComplete: () => impact.destroy() });
+
+            // 번개 빠르게 페이드
+            scene.tweens.add({ targets: g, alpha: 0, duration: 150,
+                ease: 'Quad.In', onComplete: () => g.destroy() });
+
+            if (i === 0) scene.cameras.main.shake(60, 0.007);
+        });
+    }
+}
+
+// ─── 발사 ─────────────────────────────────────────────
+function doFireStone(px, py) {
+    if (!isDragging || !currentStone) return;
+    isDragging = false;
+    trajectoryGraphics.clear();
+
+    const angle = Phaser.Math.Angle.Between(currentStone.x, currentStone.y, SLING_CENTER.x, SLING_CENTER.y);
+    const dist  = Phaser.Math.Distance.Between(currentStone.x, currentStone.y, SLING_CENTER.x, SLING_CENTER.y);
+
+    if (dist < 20) {
+        currentStone.setPosition(SLING_CENTER.x, SLING_CENTER.y);
+        return;
+    }
+
+    currentAmmo--;
+    uiAmmoText.setText(`남은 돌멩이: ${currentAmmo} / ${currentMaxAmmo}`);
+
+    const s = activeStones.get(SLING_CENTER.x, SLING_CENTER.y, 'stone');
+    if (s) {
+        s.setActive(true).setVisible(true).setDepth(1);
+        s.setScale(getStoneScale());  // 큰돌 토글 반영 (getStoneScale 내부에서 isOn 사용)
+        // 히트박스는 시각 크기와 분리 — 최대 52px로 고정 (큰돌 x3 오판정 방지)
+        const HIT_CAP = 52;
+        s.body.setSize(Math.min(s.displayWidth, HIT_CAP), Math.min(s.displayHeight, HIT_CAP));
+        s.body.reset(SLING_CENTER.x, SLING_CENTER.y);
+        s.body.allowGravity = true;
+        // 탄성증가 토글 반영한 실효 발사력
+        const effMult = (armMuscleStack > 0 && isOn('탄성증가'))
+            ? BASE_LAUNCH * Math.pow(1.2, armMuscleStack) : BASE_LAUNCH;
+        const vx = Math.cos(angle) * dist * effMult;
+        const vy = Math.sin(angle) * dist * effMult;
+        s.setVelocity(vx, vy);
+        s.body.setGravityY(0);
+        // 파워업 토글 반영한 실효 데미지
+        s.damage      = STONE_DAMAGE * Math.pow(2, (isOn('파워업') ? ironBallStack : 0)
+                                                     + (isOn('큰돌')  ? bigStoneStack  : 0));
+        s.bounceCount      = 0;
+        s.settled          = false;
+        s.magnetFired      = false;
+        s.magnetTarget     = null;
+        s.magnetTrackTime  = 0;
+        s.magnetHitCooldown= 0;   // 자석탄 재타격 쿨다운 (관통 조합용)
+        s.lightningTimer   = 0;
+        s.hitBirds        = new Set();
+        s.setAlpha(1);
+
+        // 산탄: ±20° 추가 2방향 동시 발사 (ammo 소비 없음)
+        if (shotgunStack > 0 && isOn('산탄')) {
+            [-0.175, 0.175].forEach(offset => {
+                const sa = activeStones.get(SLING_CENTER.x, SLING_CENTER.y, 'stone');
+                if (!sa) return;
+                sa.setActive(true).setVisible(true).setDepth(1);
+                sa.setScale(getStoneScale() * 0.75);
+                sa.body.setSize(Math.min(sa.displayWidth, HIT_CAP), Math.min(sa.displayHeight, HIT_CAP));
+                sa.body.reset(SLING_CENTER.x, SLING_CENTER.y);
+                sa.body.allowGravity = true;
+                sa.setVelocity(Math.cos(angle + offset) * dist * effMult,
+                               Math.sin(angle + offset) * dist * effMult);
+                sa.body.setGravityY(0);
+                sa.damage         = s.damage;
+                sa.bounceCount      = 0;
+                sa.settled          = false;
+                sa.magnetFired      = false;
+                sa.magnetTarget     = null;
+                sa.magnetTrackTime  = 0;
+                sa.magnetHitCooldown= 0;
+                sa.lightningTimer   = 0;
+                sa.hitBirds        = new Set();
+                sa.setAlpha(0.85);
+            });
+        }
+
+        cameraFollowing = true;
+        setAimBtnVisible(false);
+    }
+
+    currentStone.destroy();
+    currentStone = null;
+
+    if (currentAmmo <= 0) {
+        isRoundEnding = true;
+        sceneRef.time.delayedCall(2000, checkRoundEnd, [], sceneRef);
+    }
+    updateResearchBtn();
+    // 다음 돌은 카메라 복귀 후 wipeReturn 콜백에서 로드됨
+}
+
+// ─── 충돌: 돌멩이 vs 새 ──────────────────────────────
+function hitBird(stone, bird) {
+    if (!stone.active || !bird.active) return;
+
+    // ── 발사 직후 근거리 오판정 방지 ──────────────────────
+    // 큰돌 패시브로 히트박스가 커질 경우, 새총 주변 적에 즉시 겹치는 문제 차단
+    // 새총 중심에서 90px 이상 벗어난 뒤부터만 판정
+    if (Phaser.Math.Distance.Between(stone.x, stone.y, SLING_CENTER.x, SLING_CENTER.y) < 90) return;
+
+    // ── 중복 타격 방지 (오버랩 다중 발화 + 풀 재사용 대응) ──
+    // 관통 여부와 무관하게 같은 돌이 같은 새를 두 번 맞히는 것을 원천 차단
+    if (!stone.hitBirds) stone.hitBirds = new Set();
+    if (stone.hitBirds.has(bird)) return;
+    stone.hitBirds.add(bird);
+
+    // ── 관통 패시브 (토글 반영) ─────────────────────
+    if (piercingStack > 0 && isOn('관통')) {
+        // 관통: 돌이 계속 날아감 (hitBirds로 중복 방지는 위에서 처리)
+    } else {
+        activeStones.killAndHide(stone);
+    }
+
+    const dmg = stone.damage ?? STONE_DAMAGE;
+    bird.hp = (bird.hp ?? 1) - dmg;
+
+    if (bird.hp > 0) {
+        // 새 생존 — 피격 플래시 + 데미지 숫자
+        this.tweens.add({
+            targets: bird, alpha: 0.15, duration: 75, yoyo: true, repeat: 2,
+            onComplete: () => { if (bird && bird.active) bird.setAlpha(1); }
+        });
+        this.cameras.main.shake(50, 0.003);
+
+        const dmgTxt = this.add.text(bird.x, bird.y - 20, `-${dmg}`, {
+            fontFamily: 'Arial Black', fontSize: '20px', color: '#ff6666'
+        }).setOrigin(0.5).setDepth(8);
+        this.tweens.add({
+            targets: dmgTxt, y: dmgTxt.y - 45, alpha: 0,
+            duration: 700, onComplete: () => dmgTxt.destroy()
+        });
+        return;
+    }
+
+    // 새 처치
+    const bx = bird.x, by = bird.y;
+    const mat     = bird.materialValue ?? 10;
+    const birdKey = bird.texture ? bird.texture.key : null;
+    bird.destroy();
+
+    roundBirdsHit++;
+    roundMaterial += mat;
+    totalBirdsHit++;
+    remainingBirds = Math.max(0, remainingBirds - 1);
+    refreshMaterialHUD();
+    refreshRemainingHUD();
+    refreshPlayerPanel();
+    this.cameras.main.shake(120, 0.008);
+    // 모든 처치: 새 위치에서 떠오르는 텍스트 연출 통일
+    showKillFx(this, bx, by, mat, birdKey);
+
+    // 폭발 강화: 반경 130px 내 적에게 범위 데미지
+    if (explosionStack > 0 && isOn('폭발')) {
+        const EXPL_R = 130;
+
+        // ── 데미지 즉시 적용 ──
+        birds.getChildren().slice().forEach(b => {
+            if (!b.active) return;
+            if (Phaser.Math.Distance.Between(bx, by, b.x, b.y) <= EXPL_R) {
+                b.hp = (b.hp ?? 1) - (stone ? stone.damage ?? STONE_DAMAGE : STONE_DAMAGE);
+                if (b.hp <= 0) {
+                    const ebx = b.x, eby = b.y;
+                    const emat = b.materialValue ?? 10;
+                    const ebk  = b.texture ? b.texture.key : null;
+                    b.destroy();
+                    roundBirdsHit++; roundMaterial += emat; totalBirdsHit++;
+                    remainingBirds = Math.max(0, remainingBirds - 1);
+                    refreshMaterialHUD(); refreshRemainingHUD(); refreshPlayerPanel();
+                    showKillFx(sceneRef, ebx, eby, emat, ebk);
+                } else {
+                    this.tweens.add({ targets: b, alpha: 0.2, duration: 60, yoyo: true, repeat: 2,
+                        onComplete: () => { if (b && b.active) b.setAlpha(1); } });
+                }
+            }
+        });
+
+        // ── 폭발 비주얼: 소→대 확장 (PAANG 연출) ──
+        // 1) 중심 백열 섬광
+        const flash = this.add.graphics().setDepth(9).setPosition(bx, by);
+        flash.fillStyle(0xffffff, 1).fillCircle(0, 0, 18);
+        this.tweens.add({ targets: flash, scaleX: 2.8, scaleY: 2.8, alpha: 0,
+            duration: 160, ease: 'Quad.Out', onComplete: () => flash.destroy() });
+
+        // 2) 충격파 링 3겹 (순차 확장 — 소→대)
+        [[0xffff99, 5, 0], [0xff9933, 4, 55], [0xff4400, 3, 110]].forEach(([col, lw, delay]) => {
+            const ring = this.add.graphics().setDepth(8).setPosition(bx, by);
+            ring.lineStyle(lw, col, 1).strokeCircle(0, 0, 10);
+            const ts = EXPL_R / 10;
+            this.tweens.add({ targets: ring, scaleX: ts, scaleY: ts, alpha: 0,
+                duration: 380, delay, ease: 'Cubic.Out',
+                onComplete: () => ring.destroy() });
+        });
+
+        // 3) 불꽃 파편 8방향 방사
+        for (let i = 0; i < 8; i++) {
+            const ang  = (i / 8) * Math.PI * 2;
+            const dist = EXPL_R * (0.7 + Math.random() * 0.3);
+            const spark = this.add.graphics().setDepth(7).setPosition(bx, by);
+            spark.fillStyle(i % 2 === 0 ? 0xff7700 : 0xffdd22, 1).fillCircle(0, 0, 5 - Math.floor(i / 3));
+            this.tweens.add({ targets: spark,
+                x: bx + Math.cos(ang) * dist,
+                y: by + Math.sin(ang) * dist,
+                scaleX: 0.2, scaleY: 0.2, alpha: 0,
+                duration: 420 + i * 15, ease: 'Quad.Out',
+                onComplete: () => spark.destroy() });
+        }
+
+        // 4) 카메라 진동
+        this.cameras.main.shake(200, 0.018);
+
+        // 폭발 처치 후 라운드 클리어 체크
+        if (remainingBirds <= 0 && !isRoundEnding) {
+            isRoundEnding = true;
+            sceneRef.time.delayedCall(900, () => showRoundClear(sceneRef), [], sceneRef);
+        }
+    }
+
+    // 50마리 전멸 → 라운드 클리어
+    if (remainingBirds <= 0 && !isRoundEnding) {
+        isRoundEnding = true;
+        sceneRef.time.delayedCall(900, () => showRoundClear(sceneRef), [], sceneRef);
+    }
+
+    for (let i = 0; i < 8; i++) {
+        const scrap = this.add.rectangle(bx, by, 6, 6, 0x39ff14);
+        this.physics.add.existing(scrap);
+        scrap.body.setVelocity(
+            Phaser.Math.Between(-220, 220),
+            Phaser.Math.Between(-300, -50)
+        );
+        this.tweens.add({ targets: scrap, alpha: 0, duration: 700, onComplete: () => scrap.destroy() });
+    }
+
+}
+
+// ─── 페이드 트랜지션 + 카메라 복귀 (Phaser 네이티브 fade) ──
+function wipeReturn(scene, onComplete) {
+    setAimBtnVisible(false);
+    const cam = scene.cameras.main;
+    // 카메라가 이미 홈 근처면 암전 없이 즉시 복귀
+    const homeScrollX = Math.max(0, SLING_CENTER.x - config.width  / (2 * cam.zoom));
+    const homeScrollY = CAM_HOME_Y - config.height / (2 * cam.zoom);
+    const nearHome = cam.zoom >= 0.95 &&
+                     Math.abs(cam.scrollX - homeScrollX) < 200 &&
+                     Math.abs(cam.scrollY - homeScrollY) < 200;
+    if (nearHome) {
+        cam.stopFollow();
+        cam.setZoom(1.0);
+        cam.centerOn(SLING_CENTER.x, CAM_HOME_Y);
+        if (onComplete) onComplete();
+        return;
+    }
+    cam.fadeOut(280, 0, 0, 0);
+    cam.once('camerafadeoutcomplete', () => {
+        cam.stopFollow();
+        cam.setZoom(1.0);
+        cam.centerOn(SLING_CENTER.x, CAM_HOME_Y);
+        cam.fadeIn(280, 0, 0, 0);
+        cam.once('camerafadeincomplete', () => { if (onComplete) onComplete(); });
+    });
+}
+
+// ─── 라운드 종료 판정 (돌멩이 소진 시) ───────────────
+// 새가 전멸된 경우는 hitBird에서 showRoundClear()로 처리됨
+// 여기서는 돌멩이가 먼저 소진됐을 때만 호출됨
+function checkRoundEnd() {
+    if (activeStones.countActive(true) > 0) {
+        sceneRef.time.delayedCall(500, checkRoundEnd, [], sceneRef);
+        return;
+    }
+    // 혹시 마지막 돌에서 마지막 새까지 처치했다면 라운드 클리어 처리
+    if (remainingBirds <= 0) return;  // showRoundClear가 이미 처리 중
+
+    // 돌멩이 소진 & 새 잔존 → 게임오버
+    wipeReturn(sceneRef, () => {
+        materialStock += roundMaterial;
+        roundMaterial = 0;
+        refreshMaterialHUD();
+        showGameOver(sceneRef);
+    });
+}
+
+// ─── 라운드 클리어 오버레이 (직접 표시, wipe 없음) ───
+function showRoundClearOverlay(scene) {
+    clearOverlay();
+    uiOverlay = scene.add.container(0, 0).setDepth(50).setScrollFactor(0);
+
+    mkRect(scene, uiOverlay, 0, 0, 1280, 720, 0x000000, 0.82);
+    mkPanel(scene, uiOverlay, 290, 145, 700, 430);
+
+    mkText(scene, uiOverlay, 640, 200, `ROUND  ${roundNumber}  CLEAR!`, {
+        fontFamily: 'Arial Black', fontSize: '48px', color: '#39ff14'
+    });
+    mkText(scene, uiOverlay, 640, 280, `보유 특수물질 : ${materialStock}g`, {
+        fontFamily: 'Arial Black', fontSize: '26px', color: '#e8a030'
+    });
+    mkText(scene, uiOverlay, 640, 322, '박사님 연구에 투자할 수 있습니다!', {
+        fontFamily: 'Arial', fontSize: '16px', color: '#aaaaaa'
+    });
+
+    const div = scene.add.graphics();
+    div.lineStyle(1, 0x4a3010, 1).lineBetween(320, 350, 960, 350);
+    uiOverlay.add(div);
+
+    // 연구 버튼 (오버레이 내부) — 기증 팝업 표시
+    mkBtn(scene, uiOverlay, 640, 420, 300, 52, '🔬 박사님 강화 연구  (10g~)', 0xffdd44, '#000000', () => {
+        if (materialStock >= 10) {
+            showDonationUI(scene, 0, materialStock);
+        }
+    });
+
+    mkBtn(scene, uiOverlay, 640, 500, 280, 52, '다음 라운드 ▶', 0x39ff14, '#000000',
+        () => startNextRound(scene)
+    );
+}
+
+// ─── 라운드 클리어 (50마리 전멸) — wipe 트랜지션 후 오버레이 ─
+function showRoundClear(scene) {
+    // 적립된 라운드 획득 재료 materialStock에 합산
+    materialStock += roundMaterial;
+    roundMaterial = 0;
+    refreshMaterialHUD();
+    updateResearchBtn();
+
+    wipeReturn(scene, () => showRoundClearOverlay(scene));
+}
+
+// ─── 순위 저장 (localStorage) ────────────────────────
+const SCORE_KEY = 'slingshot_scores_v1';
+
+function getScores() {
+    try { return JSON.parse(localStorage.getItem(SCORE_KEY) || '[]'); }
+    catch { return []; }
+}
+
+function saveScore(name, kills, round, material) {
+    const scores = getScores();
+    scores.push({
+        name, kills, round, material,
+        date: new Date().toLocaleDateString('ko-KR')
+    });
+    scores.sort((a, b) => b.kills - a.kills || b.round - a.round || b.material - a.material);
+    scores.splice(10);  // 상위 10개만 보관
+    localStorage.setItem(SCORE_KEY, JSON.stringify(scores));
+}
+
+// HTML 이름 입력창 (canvas 위에 오버레이)
+function openNameInput(scene) {
+    // 기존 입력창 제거
+    const old = document.getElementById('sling-name-overlay');
+    if (old) old.remove();
+
+    const div = document.createElement('div');
+    div.id = 'sling-name-overlay';
+    div.style.cssText = [
+        'position:fixed', 'top:50%', 'left:50%',
+        'transform:translate(-50%,-50%)',
+        'background:#1a1208', 'border:2px solid #e8a030',
+        'border-radius:14px', 'padding:32px 44px',
+        'z-index:9999', 'text-align:center',
+        'font-family:"Arial Black",Arial,sans-serif',
+        'color:#ffffff', 'min-width:380px',
+        'box-shadow:0 0 40px rgba(232,160,40,0.4)'
+    ].join(';');
+
+    div.innerHTML = `
+        <div style="font-size:20px;margin-bottom:8px;color:#e8a030">이름을 남기시오</div>
+        <div style="font-size:14px;color:#888;margin-bottom:18px">
+            처치 ${totalBirdsHit}마리 &nbsp;|&nbsp; ROUND ${roundNumber}
+        </div>
+        <input id="sling-name-input" type="text" maxlength="10"
+            placeholder="닉네임 (최대 10자)"
+            style="font-size:18px;padding:9px 16px;border-radius:7px;
+                   border:1.5px solid #e8a030;background:#2a1808;
+                   color:#fff;width:240px;text-align:center;outline:none;
+                   font-family:Arial Black,sans-serif;">
+        <div style="margin-top:18px;display:flex;gap:12px;justify-content:center">
+            <button id="sling-confirm" style="font-size:15px;padding:10px 30px;
+                background:#e8a030;color:#000;border:none;border-radius:7px;
+                cursor:pointer;font-family:Arial Black,Arial">확 인</button>
+            <button id="sling-cancel" style="font-size:15px;padding:10px 24px;
+                background:#334455;color:#aaa;border:none;border-radius:7px;
+                cursor:pointer;font-family:Arial,sans-serif">취소</button>
+        </div>`;
+    document.body.appendChild(div);
+
+    const inp = document.getElementById('sling-name-input');
+    inp.focus();
+
+    const close = () => { const d = document.getElementById('sling-name-overlay'); if (d) d.remove(); };
+
+    document.getElementById('sling-confirm').onclick = () => {
+        const name = inp.value.trim() || '이름없음';
+        saveScore(name, totalBirdsHit, roundNumber, materialStock);
+        close();
+        showGameOver(scene);   // 저장 후 게임오버 화면 새로고침 (랭킹 갱신)
+    };
+    document.getElementById('sling-cancel').onclick = close;
+    inp.addEventListener('keydown', e => {
+        if (e.key === 'Enter')  document.getElementById('sling-confirm').click();
+        if (e.key === 'Escape') close();
+    });
+}
+
+// ─── GAME OVER ────────────────────────────────────────
+function showGameOver(scene) {
+    // HTML 입력창이 열려있으면 닫기
+    const old = document.getElementById('sling-name-overlay');
+    if (old) old.remove();
+
+    clearOverlay();
+    uiOverlay = scene.add.container(0, 0).setDepth(50).setScrollFactor(0);
+
+    mkRect(scene, uiOverlay, 0, 0, 1280, 720, 0x000000, 0.90);
+
+    // ── 상단: 타이틀 + 이번 기록 ──────────────────────
+    mkText(scene, uiOverlay, 640, 48, 'GAME OVER', {
+        fontFamily: 'Arial Black', fontSize: '64px', color: '#ff4444',
+        stroke: '#880000', strokeThickness: 4
+    });
+    mkText(scene, uiOverlay, 640, 132,
+        `처치한 적 : ${totalBirdsHit}마리   |   ROUND ${roundNumber}   |   보유 특수물질 ${materialStock}g`, {
+        fontFamily: 'Arial Black', fontSize: '20px', color: '#ffffff'
+    });
+    mkText(scene, uiOverlay, 640, 162, '돌멩이가 소진되었습니다. 남은 오염 생물을 처치하지 못했습니다.', {
+        fontFamily: 'Arial', fontSize: '15px', color: '#888888'
+    });
+
+    // ── 구분선 ───────────────────────────────────────
+    const div1 = scene.add.graphics();
+    div1.lineStyle(1, 0x4a3010, 1).lineBetween(240, 185, 1040, 185);
+    uiOverlay.add(div1);
+
+    // ── 순위표 ───────────────────────────────────────
+    mkText(scene, uiOverlay, 640, 200, '🏆  역대 순위', {
+        fontFamily: 'Arial Black', fontSize: '20px', color: '#e8a030'
+    });
+
+    const scores  = getScores();
+    const headers = ['순위', '이름', '처치', '라운드', '날짜'];
+    const colX    = [300, 460, 680, 840, 1000];
+    const hY      = 234;
+
+    // 헤더
+    headers.forEach((h, i) => {
+        mkText(scene, uiOverlay, colX[i], hY, h, {
+            fontFamily: 'Arial Black', fontSize: '14px', color: '#aaaaaa'
+        });
+    });
+
+    const div2 = scene.add.graphics();
+    div2.lineStyle(1, 0x333333, 1).lineBetween(240, hY + 22, 1040, hY + 22);
+    uiOverlay.add(div2);
+
+    if (scores.length === 0) {
+        mkText(scene, uiOverlay, 640, 310, '아직 기록이 없습니다. 이름을 남겨보세요!', {
+            fontFamily: 'Arial', fontSize: '16px', color: '#555555'
+        });
+    } else {
+        scores.slice(0, 7).forEach((s, idx) => {
+            const ry    = hY + 36 + idx * 38;
+            const isCur = (s.kills === totalBirdsHit && s.round === roundNumber && s.name === '🆕');
+            const medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `${idx + 1}위`;
+            const rowCol = idx % 2 === 0 ? 0x111111 : 0x0a0a0a;
+            const rowG = scene.add.graphics();
+            rowG.fillStyle(rowCol, 0.6).fillRect(240, ry - 14, 800, 34);
+            uiOverlay.add(rowG);
+
+            const tc = isCur ? '#ffff44' : idx < 3 ? '#ffffff' : '#aaaaaa';
+            mkText(scene, uiOverlay, colX[0], ry, medal,           { fontFamily: 'Arial', fontSize: '16px', color: tc });
+            mkText(scene, uiOverlay, colX[1], ry, s.name,          { fontFamily: 'Arial Black', fontSize: '16px', color: tc });
+            mkText(scene, uiOverlay, colX[2], ry, `${s.kills}마리`, { fontFamily: 'Arial', fontSize: '16px', color: tc });
+            mkText(scene, uiOverlay, colX[3], ry, `R${s.round}`,   { fontFamily: 'Arial', fontSize: '16px', color: tc });
+            mkText(scene, uiOverlay, colX[4], ry, s.date,          { fontFamily: 'Arial', fontSize: '13px', color: '#666666' });
+        });
+    }
+
+    // ── 하단 버튼 ────────────────────────────────────
+    mkBtn(scene, uiOverlay, 390, 660, 290, 52, '✏  이름 남기기 (순위 등록)', 0xffaa00, '#000000',
+        () => openNameInput(scene)
+    );
+    mkBtn(scene, uiOverlay, 760, 660, 220, 52, '메인 메뉴로', 0x39ff14, '#000000',
+        () => goToMainMenu(scene)
+    );
+}
+
+// ─── 박사님 도네이션 UI ───────────────────────────────
+function showDonationUI(scene, roundEarned, stock) {
+    clearOverlay();
+    uiOverlay = scene.add.container(0, 0).setDepth(50).setScrollFactor(0);
+
+    mkRect(scene, uiOverlay, 0, 0, 1280, 720, 0x000000, 0.82);
+    mkPanel(scene, uiOverlay, 320, 130, 640, 460);
+
+    // 제목
+    mkText(scene, uiOverlay, 640, 168, '🔬  박사님 연구실', {
+        fontFamily: 'Arial Black', fontSize: '26px', color: '#e8a030'
+    });
+
+    // 구분선
+    const div1 = scene.add.graphics();
+    div1.lineStyle(1, 0x4a3010, 1).lineBetween(350, 206, 930, 206);
+    uiOverlay.add(div1);
+
+    // 기증량 (전량)
+    mkText(scene, uiOverlay, 640, 224, '특수물질 전량을 연구에 투자합니다', {
+        fontFamily: 'Arial', fontSize: '14px', color: '#aaaaaa', align: 'center'
+    });
+    mkText(scene, uiOverlay, 640, 252, `${stock}g`, {
+        fontFamily: 'Arial Black', fontSize: '52px', color: '#ffdd44', align: 'center'
+    });
+
+    // 구분선
+    const div2 = scene.add.graphics();
+    div2.lineStyle(1, 0x4a3010, 1).lineBetween(350, 318, 930, 318);
+    uiOverlay.add(div2);
+
+    // 희귀도 확률 표시
+    const entry = RARITY_TABLE.find(e => stock >= e.minAmount) ?? RARITY_TABLE[RARITY_TABLE.length - 1];
+    const w = entry.weights;
+    mkText(scene, uiOverlay, 640, 338, entry.hint, {
+        fontFamily: 'Arial', fontSize: '15px', color: '#cccccc', align: 'center'
+    });
+
+    // 확률 막대 시각화
+    const barX = 380, barY = 372, barW = 520, barH = 26;
+    const barBg = scene.add.graphics();
+    barBg.fillStyle(0x222222, 1).fillRoundedRect(barX, barY, barW, barH, 6);
+    uiOverlay.add(barBg);
+
+    const total = w.NORMAL + w.RARE + w.EPIC;
+    let ox = barX;
+    const segments = [
+        { pct: w.NORMAL / total, color: 0x888888, label: '노멀' },
+        { pct: w.RARE   / total, color: 0x44bbff, label: '레어' },
+        { pct: w.EPIC   / total, color: 0xaa44ff, label: 'EPIC' },
+    ];
+    segments.forEach(seg => {
+        if (seg.pct <= 0) return;
+        const sw = barW * seg.pct;
+        const bar = scene.add.graphics();
+        bar.fillStyle(seg.color, 0.85).fillRoundedRect(ox, barY, sw, barH, 4);
+        uiOverlay.add(bar);
+        ox += sw;
+    });
+
+    // 확률 수치 텍스트
+    const pctParts = [];
+    if (w.NORMAL > 0) pctParts.push(`노멀 ${w.NORMAL}%`);
+    if (w.RARE   > 0) pctParts.push(`레어 ${w.RARE}%`);
+    if (w.EPIC   > 0) pctParts.push(`EPIC ${w.EPIC}%`);
+    mkText(scene, uiOverlay, 640, 406, pctParts.join('  /  '), {
+        fontFamily: 'Arial', fontSize: '14px', color: '#dddddd', align: 'center'
+    });
+
+    // 전량 기증 버튼
+    mkBtn(scene, uiOverlay, 640, 520, 340, 58, '전량 기증하고 강화 선택', 0xe8a030, '#000000',
+        () => {
+            const donatedAmt = stock;
+            materialStock   -= donatedAmt;
+            refreshMaterialHUD();
+            updateResearchBtn();
+            showPassiveSelection(scene, donatedAmt);
+        }, 17
+    );
+
+    // 닫기 버튼
+    mkBtn(scene, uiOverlay, 640, 556, 160, 32, '취소', 0x222222, '#888888',
+        () => { clearOverlay(); updateResearchBtn(); }, 13
+    );
+}
+
+function getRarityHint(donated) {
+    const entry = RARITY_TABLE.find(e => donated >= e.minAmount) ?? RARITY_TABLE[RARITY_TABLE.length - 1];
+    const w = entry.weights;
+    let detail = `노멀 ${w.NORMAL}%`;
+    if (w.RARE  > 0) detail += `  /  레어 ${w.RARE}%`;
+    if (w.EPIC  > 0) detail += `  /  EPIC ${w.EPIC}%`;
+    return `${entry.hint}\n(${detail})`;
+}
+
+// ─── 희귀도 추첨 헬퍼 ─────────────────────────────────
+function rollRarity(donatedAmt) {
+    const row = RARITY_TABLE.find(r => donatedAmt >= r.minAmount) ?? RARITY_TABLE[RARITY_TABLE.length - 1];
+    const w   = row.weights;
+    const total = w.NORMAL + w.RARE + w.EPIC;
+    let rand = Math.random() * total;
+    if ((rand -= w.NORMAL) < 0) return 'NORMAL';
+    if ((rand -= w.RARE)   < 0) return 'RARE';
+    return 'EPIC';
+}
+
+// ─── 패시브 카드 선택 UI ──────────────────────────────
+function showPassiveSelection(scene, donatedAmt = 10) {
+    clearOverlay();
+    uiOverlay = scene.add.container(0, 0).setDepth(50).setScrollFactor(0);
+
+    mkRect(scene, uiOverlay, 0, 0, 1280, 720, 0x000000, 0.84);
+    mkText(scene, uiOverlay, 640, 52, '강화를 선택하세요', {
+        fontFamily: 'Arial Black', fontSize: '34px', color: '#ffffff'
+    });
+    // 기증량 기반 등급 힌트
+    const rarityRow = RARITY_TABLE.find(r => donatedAmt >= r.minAmount) ?? RARITY_TABLE[RARITY_TABLE.length - 1];
+    mkText(scene, uiOverlay, 640, 100, `기증량 ${donatedAmt}g  ─  ${rarityRow.hint}`, {
+        fontFamily: 'Arial', fontSize: '16px', color: '#cccccc'
+    });
+
+    // 색상 규칙: NORMAL=회색(0x999999), RARE=하늘색(0x44bbff), EPIC=보라색(0xaa44ff), (예정)LEGENDARY=금색(0xffa500)
+    const ALL_PASSIVES = [
+        { name: '탄성증가',  desc: '발사력을 1.2배로 올립니다.',                                          color: 0x999999, rarity: 'NORMAL' },
+        { name: '탄성증가',  desc: '발사력을 1.2배로 올립니다.',                                          color: 0x999999, rarity: 'NORMAL' },
+        { name: '탄성증가',  desc: '발사력을 1.2배로 올립니다.',                                          color: 0x999999, rarity: 'NORMAL' },
+        { name: '파워업',   desc: '공격력이 2배가 됩니다.',                                              color: 0x999999, rarity: 'NORMAL' },
+        { name: '파워업',   desc: '공격력이 2배가 됩니다.',                                              color: 0x999999, rarity: 'NORMAL' },
+        { name: '파워업',   desc: '공격력이 2배가 됩니다.',                                              color: 0x999999, rarity: 'NORMAL' },
+        { name: '돌을 줍다', desc: '돌멩이를 2개 추가합니다.\n(즉시 지급 · 1회성)',                       color: 0x999999, rarity: 'NORMAL' },
+        { name: '돌을 줍다', desc: '돌멩이를 2개 추가합니다.\n(즉시 지급 · 1회성)',                       color: 0x999999, rarity: 'NORMAL' },
+        { name: '돌을 줍다', desc: '돌멩이를 2개 추가합니다.\n(즉시 지급 · 1회성)',                       color: 0x999999, rarity: 'NORMAL' },
+        { name: '자석탄',   desc: '포물선 정점에서 가장 가까운 적으로\n궤도를 강제 수정합니다!',           color: 0x44bbff, rarity: 'RARE'   },
+        { name: '큰돌',    desc: '돌멩이 크기가 2배가 됩니다.\n공격력도 2배가 됩니다!',                  color: 0x44bbff, rarity: 'RARE'   },
+        { name: '큰돌',    desc: '돌멩이 크기가 2배가 됩니다.\n공격력도 2배가 됩니다!',                  color: 0x44bbff, rarity: 'RARE'   },
+        { name: '큰돌',    desc: '돌멩이 크기가 2배가 됩니다.\n공격력도 2배가 됩니다!',                  color: 0x44bbff, rarity: 'RARE'   },
+        { name: '조준선', desc: '발사 궤적의 50%가 보입니다.\n한 번 더 선택하면 100% 표시!', color: 0x44bbff, rarity: 'RARE'   },
+        { name: '조준선', desc: '발사 궤적의 50%가 보입니다.\n한 번 더 선택하면 100% 표시!', color: 0x44bbff, rarity: 'RARE'   },
+        { name: '농구공', desc: '땅에 부딪히면 2배 속도로 튀어오릅니다.\n1스택=1바운드  /  2스택=2바운드',  color: 0x44bbff, rarity: 'RARE'   },
+        { name: '농구공', desc: '땅에 부딪히면 2배 속도로 튀어오릅니다.\n1스택=1바운드  /  2스택=2바운드',  color: 0x44bbff, rarity: 'RARE'   },
+        { name: '관통',   desc: '돌이 명중 후에도 계속 날아가\n모든 오염 생물을 관통합니다!',              color: 0xaa44ff, rarity: 'EPIC'   },
+        { name: '산탄',   desc: '발사 시 ±10° 방향으로 2개를 추가 발사!\n총 3방향 동시 공격.',              color: 0xaa44ff, rarity: 'EPIC'   },
+        { name: '폭발',   desc: '명중 시 반경 130px 폭발!\n범위 내 모든 오염 생물에게 피해.',               color: 0xaa44ff, rarity: 'EPIC'   },
+        { name: '번개탄', desc: '비행 중 0.5초마다 반경 160px에\n번개가 내리쳐 주변 적을 공격합니다!',       color: 0xaa44ff, rarity: 'EPIC'   },
+    ];
+    // 현재 최대 스택에 도달한 패시브 제외
+    const stackOf = n => ({ '탄성증가': armMuscleStack,  '큰돌':      bigStoneStack,
+                             '파워업': ironBallStack,   '조준선':    aimLineStack,
+                             '농구공': basketballStack, '관통':      piercingStack,
+                             '자석탄': magnetStack,     '돌을 줍다': pickupStoneStack,
+                             '산탄':   shotgunStack,    '폭발':      explosionStack,
+                             '번개탄': lightningStack }[n] ?? 0);
+    const maxStack = n => PASSIVE_MAX_STACK_OF[n] ?? PASSIVE_MAX_STACK;
+    const available = ALL_PASSIVES.filter(p => stackOf(p.name) < maxStack(p.name));
+
+    // 기증량 기반 희귀도 추첨 — 카드 3장 독립 추첨
+    const POOL = [];
+    const pickedNames = [];
+    for (let i = 0; i < 3; i++) {
+        const rarity = rollRarity(donatedAmt);
+        // 1순위: 해당 등급 & 아직 안 뽑은 이름
+        let candidates = available.filter(p => p.rarity === rarity && !pickedNames.includes(p.name));
+        // EPIC → RARE 강등 (RARE 후보 없으면 NORMAL 강등)
+        if (candidates.length === 0 && rarity === 'EPIC')
+            candidates = available.filter(p => p.rarity === 'RARE' && !pickedNames.includes(p.name));
+        if (candidates.length === 0 && rarity !== 'NORMAL')
+            candidates = available.filter(p => p.rarity === 'NORMAL' && !pickedNames.includes(p.name));
+        // 그래도 없으면 같은 등급 내 이름 중복 허용 (스택 진행)
+        // ★ 절대 상위 등급으로 올라가지 않음 ★
+        if (candidates.length === 0)
+            candidates = available.filter(p => p.rarity === rarity);
+        if (candidates.length === 0 && rarity !== 'NORMAL')
+            candidates = available.filter(p => p.rarity === 'NORMAL');
+        if (candidates.length === 0) break;  // 더 뽑을 수 없음 → 카드 수 줄여서 표시
+        const pick = candidates[Phaser.Math.Between(0, candidates.length - 1)];
+        POOL.push(pick);
+        pickedNames.push(pick.name);
+    }
+
+    const CW = 260, CH = 310;
+    // 티어별 뱃지 & 색상
+    const TIER_BADGE = { NORMAL: '[N]', RARE: '[R]', EPIC: '[E]' };   // 설명 앞 약자 뱃지
+    const TIER_LABEL = { NORMAL: 'NORMAL', RARE: 'RARE', EPIC: 'EPIC' }; // 카드 상단 전체 이름
+    const TIER_COLOR = { NORMAL: '#aaaaaa', RARE: '#44bbff', EPIC: '#cc66ff' };
+
+    POOL.forEach((p, i) => {
+        const cx       = 340 + i * (CW + 40);
+        const cy       = 400;
+        const tierCol  = TIER_COLOR[p.rarity] ?? '#aaaaaa';
+        const badge    = TIER_BADGE[p.rarity] ?? '[?]';
+
+        const card = scene.add.graphics();
+        drawCard(card, cx, cy, CW, CH, 0x1e2a3a, p.color, 2);
+        uiOverlay.add(card);
+
+        // 상단 티어 뱃지 (배경색 + 전체 이름: NORMAL / RARE / EPIC)
+        mkText(scene, uiOverlay, cx, cy - CH / 2 + 24, TIER_LABEL[p.rarity] ?? p.rarity, {
+            fontFamily: 'Arial Black', fontSize: '13px', color: '#000000',
+            backgroundColor: tierCol, padding: { x: 10, y: 4 }
+        });
+
+        // 강화명 — 티어별 색상
+        mkText(scene, uiOverlay, cx, cy - 52, p.name, {
+            fontFamily: 'Arial Black', fontSize: '28px', color: tierCol
+        });
+
+        // 설명 텍스트
+        mkText(scene, uiOverlay, cx, cy + 14, p.desc, {
+            fontFamily: 'Arial', fontSize: '16px', color: '#cccccc',
+            wordWrap: { width: CW - 28 }, align: 'center'
+        });
+
+        const hit = scene.add.rectangle(cx, cy, CW, CH, 0x000000, 0)
+            .setInteractive({ useHandCursor: true });
+        hit.on('pointerover', () => { card.clear(); drawCard(card, cx, cy, CW, CH, 0x2e3e52, p.color, 3); });
+        hit.on('pointerout',  () => { card.clear(); drawCard(card, cx, cy, CW, CH, 0x1e2a3a, p.color, 2); });
+        overlayHitAreas.push({ x: cx, y: cy, hw: CW / 2, hh: CH / 2, cb: () => applyPassive(scene, p) });
+        uiOverlay.add(hit);
+    });
+
+    // ── 뒤로 가기 버튼 — 기증금액 환불 후 기증 UI 재표시 ──
+    mkBtn(scene, uiOverlay, 640, 668, 200, 42, '◀ 뒤로 가기', 0x334455, '#aaaaaa', () => {
+        // 기증했던 금액 환불
+        materialStock += donatedAmt;
+        refreshMaterialHUD();
+        updateResearchBtn();
+        // 기증 UI 다시 표시
+        showDonationUI(scene, 0, materialStock);
+    }, 18);
+}
+
+// ─── 패시브 적용 ──────────────────────────────────────
+function applyPassive(scene, passive) {
+    // 안전망: 최대 스택 도달 시 무시 (풀 필터링이 1차 방어, 여기가 2차)
+    const _ms = n => PASSIVE_MAX_STACK_OF[n] ?? PASSIVE_MAX_STACK;
+    if (passive.name === '탄성증가') {
+        if (armMuscleStack >= _ms('탄성증가')) return;
+        armMuscleStack++;
+        launchMult = BASE_LAUNCH * Math.pow(1.2, armMuscleStack);
+    } else if (passive.name === '파워업') {
+        if (ironBallStack >= _ms('파워업')) return;
+        ironBallStack++;
+    } else if (passive.name === '돌을 줍다') {
+        if (pickupStoneStack >= _ms('돌을 줍다')) return;
+        pickupStoneStack++;
+        // 즉시 돌멩이 +2 지급 (1회성) — 현재 탄수·최대 탄수 동시 증가
+        currentAmmo    += 2;
+        currentMaxAmmo += 2;
+        if (uiAmmoText) uiAmmoText.setText(`남은 돌멩이: ${currentAmmo} / ${currentMaxAmmo}`);
+    } else if (passive.name === '큰돌') {
+        if (bigStoneStack >= _ms('큰돌')) return;
+        bigStoneStack++;
+    } else if (passive.name === '조준선') {
+        if (aimLineStack >= _ms('조준선')) return;
+        aimLineStack++;
+    } else if (passive.name === '농구공') {
+        if (basketballStack >= _ms('농구공')) return;
+        basketballStack++;
+    } else if (passive.name === '관통') {
+        if (piercingStack >= _ms('관통')) return;
+        piercingStack++;
+    } else if (passive.name === '자석탄') {
+        if (magnetStack >= _ms('자석탄')) return;
+        magnetStack++;
+    } else if (passive.name === '산탄') {
+        if (shotgunStack >= _ms('산탄')) return;
+        shotgunStack++;
+    } else if (passive.name === '폭발') {
+        if (explosionStack >= _ms('폭발')) return;
+        explosionStack++;
+    } else if (passive.name === '번개탄') {
+        if (lightningStack >= _ms('번개탄')) return;
+        lightningStack++;
+    }
+    // 첫 획득 시 토글 ON으로 초기화
+    if (!(passive.name in passiveActive)) {
+        passiveActive[passive.name] = true;
+    }
+    refreshPassiveHUD();
+    rebuildPassiveLines(scene);
+    // 장전된 돌이 있으면 즉시 스케일 갱신 (큰돌 패시브 적용 즉시 반영)
+    if (currentStone) {
+        currentStone.setScale(getStoneScale());
+    }
+    // 라운드 클리어 상태에서 연구한 경우 → 클리어 화면 재표시 (wipe 없이)
+    // 미드라운드 연구인 경우 → 오버레이 닫고 게임 화면 복귀
+    if (remainingBirds <= 0 && isRoundEnding) {
+        showRoundClearOverlay(scene);
+    } else {
+        clearOverlay();
+    }
+}
+
+function refreshPassiveHUD() {
+    // 좌측 플레이어 패널(refreshPlayerPanel)에 패시브가 표시되므로 여기서는 빈 문자열 유지
+    uiPassiveText.setText('');
+}
+
+// ─── 다음 라운드 시작 ─────────────────────────────────
+function startNextRound(scene) {
+    clearOverlay();
+    setAimBtnVisible(false);
+    isRoundEnding   = false;
+    cameraFollowing = false;
+    roundNumber++;
+
+    // 매 라운드 새 50마리 재스폰 + 돌멩이 30개 초기화
+    birds.clear(true, true);
+    roundBirdsHit = 0;
+    roundMaterial = 0;
+    currentAmmo   = MAX_AMMO;
+
+    uiRoundText.setText(`ROUND ${roundNumber}`);
+    uiAmmoText.setText(`남은 돌멩이: ${MAX_AMMO} / ${MAX_AMMO}`); currentMaxAmmo = MAX_AMMO;
+    refreshPollutionHUD();
+    refreshPlayerPanel();
+
+    spawnBirdsSpread(scene);
+    grandTotalBirds = birds.getChildren().length;
+    remainingBirds  = grandTotalBirds;
+    refreshRemainingHUD();
+    updateResearchBtn();
+
+    showMissionOverlay(scene);
+}
+
+// ─── 메인 메뉴로 복귀 ────────────────────────────────
+function goToMainMenu(scene) {
+    const nameOvl = document.getElementById('sling-name-overlay');
+    if (nameOvl) nameOvl.remove();
+    clearOverlay();
+    setAimBtnVisible(false);
+    isRoundEnding = false;
+    scene.cameras.main.fadeOut(600, 0, 0, 0);
+    scene.cameras.main.once('camerafadeoutcomplete', () => {
+        playBgm(scene, 'introMusic');
+        scene.scene.start('IntroScene');
+    });
+}
+
+// ─── 게임 재시작 ──────────────────────────────────────
+function restartGame(scene) {
+    // HTML 이름 입력창 닫기
+    const nameOvl = document.getElementById('sling-name-overlay');
+    if (nameOvl) nameOvl.remove();
+    clearOverlay();
+    setAimBtnVisible(false);
+    isRoundEnding = false;
+
+    // 카메라 즉시 초기화
+    scene.cameras.main.stopFollow();
+    scene.cameras.main.centerOn(SLING_CENTER.x, CAM_HOME_Y);
+    scene.cameras.main.setZoom(1.0);
+    cameraFollowing = false;
+
+    activeStones.clear(true, true);
+    birds.clear(true, true);
+    if (currentStone) { currentStone.destroy(); currentStone = null; }
+
+    roundNumber    = 1;
+    totalBirdsHit  = 0;
+    roundBirdsHit  = 0;
+    roundMaterial  = 0;
+    materialStock  = 0;
+    remainingBirds = 0;   // spawnBirdsSpread 이후 실제 소환 수로 재설정됨
+    currentAmmo    = MAX_AMMO;
+    armMuscleStack = 0;
+    bigStoneStack  = 0;
+    ironBallStack  = 0;
+    aimLineStack   = 0;
+    piercingStack  = 0;
+    basketballStack = 0;
+    shotgunStack     = 0;
+    magnetStack      = 0;
+    explosionStack   = 0;
+    pickupStoneStack = 0;
+    lightningStack   = 0;
+    launchMult     = BASE_LAUNCH;
+
+    // 패시브 라인 초기화
+    uiPassiveLines.forEach(o => o.destroy());
+    uiPassiveLines = [];
+    Object.keys(passiveActive).forEach(k => delete passiveActive[k]);
+
+    uiRoundText.setText('ROUND 1');
+    uiAmmoText.setText(`남은 돌멩이: ${MAX_AMMO} / ${MAX_AMMO}`); currentMaxAmmo = MAX_AMMO;
+    uiPassiveText.setText('');
+    refreshMaterialHUD();
+    refreshPollutionHUD();
+    refreshRemainingHUD();
+    refreshPlayerPanel();
+    updateResearchBtn();
+
+    spawnBirdsSpread(scene);
+    // 재시작 시 실제 소환 수량으로 재확정
+    grandTotalBirds = birds.getChildren().length;
+    remainingBirds  = grandTotalBirds;
+    refreshRemainingHUD();
+    showMissionOverlay(scene);
+}
+
+// ─── UI 헬퍼 ─────────────────────────────────────────
+function clearOverlay() {
+    if (uiOverlay) { uiOverlay.destroy(true); uiOverlay = null; }
+    overlayHitAreas = [];
+}
+
+function setAimBtnVisible(v) {
+    if (!uiAimBtn) return;
+    uiAimBtn.setVisible(v);
+    uiAimBtnTxt.setVisible(v);
+}
+
+function returnToAimView() {
+    const cam = sceneRef.cameras.main;
+    cam.setZoom(1.0);
+    cam.centerOn(SLING_CENTER.x, CAM_HOME_Y);
+    setAimBtnVisible(false);
+}
+
+function refreshMaterialHUD() {
+    if (uiMaterialText) uiMaterialText.setText(`보유 특수물질 : ${materialStock + roundMaterial}g`);
+    updateResearchBtn();
+}
+
+// ─── 연구 버튼 상태 갱신 ─────────────────────────────
+// 재료 충분 AND 돌 비행 중 아님 AND 오버레이 없음 → 활성
+function updateResearchBtn() {
+    if (!uiResearchBtnTxt) return;
+    const stoneFlying = activeStones && activeStones.countActive(true) > 0;
+    const canResearch  = (materialStock + roundMaterial) >= 10 && !stoneFlying;
+    uiResearchBtnTxt.setColor(canResearch ? '#ffdd44' : '#554422');
+    uiResearchBtnTxt.setAlpha(canResearch ? 1.0 : 0.45);
+    if (uiResearchBtn && uiResearchBtn._draw) uiResearchBtn._draw(canResearch);
+}
+
+function refreshRemainingHUD() {
+    if (!uiRemainingText) return;
+    const pct  = grandTotalBirds > 0
+        ? Math.round((remainingBirds / grandTotalBirds) * 100)
+        : 0;
+    const color = remainingBirds === 0 ? '#44ff88'
+                : pct <= 20           ? '#ff4444'
+                : pct <= 50           ? '#ffaa22'
+                :                       '#ffdd55';
+    uiRemainingText.setColor(color);
+    uiRemainingText.setText(`남은 오염 생물들 = ${remainingBirds}마리`);
+}
+
+// ─── 킬 알림 자막 ────────────────────────────────────
+// ─── 킬 연출: 새 위치에서 팍팍팍 떠오름 (전 처치 공통) ──
+function showKillFx(scene, worldX, worldY, material, textureKey) {
+    const enemyInfo = Object.values(ENEMY_DATA).find(e => e.key === textureKey);
+    const name = enemyInfo ? enemyInfo.name : '오염 생물';
+
+    // 획득 g 수 텍스트 — 월드 좌표 (카메라 팔로우와 함께 이동)
+    const matTxt = scene.add.text(worldX, worldY - 10,
+        `+${material}g`, {
+            fontFamily: '"Arial Black", Arial',
+            fontSize: '34px',
+            color: '#39ff14',
+            stroke: '#003300',
+            strokeThickness: 5,
+        }
+    ).setOrigin(0.5).setDepth(18).setScale(1.5).setAlpha(1);
+
+    // 적 이름 소자막 — 아래쪽에 살짝
+    const nameTxt = scene.add.text(worldX, worldY + 18,
+        name, {
+            fontFamily: 'Arial',
+            fontSize: '14px',
+            color: '#aaffaa',
+            stroke: '#001100',
+            strokeThickness: 3,
+        }
+    ).setOrigin(0.5).setDepth(18).setAlpha(0.9);
+
+    // 팍! 팝인: 크게 등장 → 작아지며 위로 떠오름 → 페이드
+    scene.tweens.add({
+        targets: matTxt,
+        y:       worldY - 170,
+        scaleX:  0.85,
+        scaleY:  0.85,
+        alpha:   0,
+        duration: 820,
+        ease: 'Power2.easeOut',
+        onComplete: () => matTxt.destroy()
+    });
+    scene.tweens.add({
+        targets: nameTxt,
+        y:       worldY - 130,
+        alpha:   0,
+        duration: 620,
+        delay:   80,
+        ease: 'Power2.easeOut',
+        onComplete: () => nameTxt.destroy()
+    });
+}
+
+function showKillNotification(scene, textureKey, material) {
+    const enemyInfo = Object.values(ENEMY_DATA).find(e => e.key === textureKey);
+    const name = enemyInfo ? enemyInfo.name : '방사능 새';
+
+    const bg = scene.add.rectangle(640, 345, 500, 82, 0x000000, 0.58)
+        .setScrollFactor(0).setDepth(14).setAlpha(0);
+
+    const msg = scene.add.text(640, 345,
+        `${name} 한마리를 잡았습니다\n특수물질 ${material}g 획득`,
+        {
+            fontFamily: 'Arial Black', fontSize: '22px',
+            color: '#39ff14', align: 'center',
+            stroke: '#000000', strokeThickness: 3,
+            lineSpacing: 8,
+        }
+    ).setOrigin(0.5).setScrollFactor(0).setDepth(15).setAlpha(0);
+
+    scene.tweens.add({
+        targets: [bg, msg], alpha: 1, duration: 140,
+        onComplete: () => {
+            scene.time.delayedCall(1100, () => {
+                scene.tweens.add({
+                    targets: [bg, msg], alpha: 0, duration: 380,
+                    onComplete: () => { bg.destroy(); msg.destroy(); }
+                });
+            });
+        }
+    });
+}
+
+function refreshPollutionHUD() {
+    if (uiPollutionText) uiPollutionText.setText(`지구 오염도: ${roundNumber * 10}%`);
+}
+
+function drawMinimapBtn(z) {
+    if (!uiMinimapBtnBg) return;
+    uiMinimapBtnBg.clear();
+    const cx = config.width / 2, cy = config.height / 2;
+    const bw = 180 / z, bh = 26 / z;
+    const x0 = cx + (118 - cx) / z - bw / 2;
+    const y0 = cy + (262 - cy) / z - bh / 2;
+    const bgCol  = minimapVisible ? 0x140e02 : 0x100c04;
+    const borCol = minimapVisible ? 0xe8a030 : 0x4a3010;
+    uiMinimapBtnBg.fillStyle(bgCol, 0.90).fillRoundedRect(x0, y0, bw, bh, 6 / z);
+    uiMinimapBtnBg.lineStyle(1 / z, borCol, 0.75).strokeRoundedRect(x0, y0, bw, bh, 6 / z);
+}
+
+function drawPanelBg(z) {
+    if (!uiPanelBg) return;
+    uiPanelBg.clear();
+    const cx = config.width / 2, cy = config.height / 2;
+    const x0 = cx + (8   - cx) / z;
+    const y0 = cy + (8   - cy) / z;
+    const w  = 220 / z, h = _panelH / z;   // ← 동적 높이
+    uiPanelBg.fillStyle(0x110c02, 0.92).fillRoundedRect(x0, y0, w, h, 10 / z);
+    uiPanelBg.lineStyle(1 / z, 0xe8a030, 0.40).strokeRoundedRect(x0, y0, w, h, 10 / z);
+    // 제목 구분선
+    uiPanelBg.lineStyle(1 / z, 0x5a3e10, 0.8).lineBetween(
+        x0 + 10 / z, y0 + 38 / z,
+        x0 + w - 10 / z, y0 + 38 / z
+    );
+}
+
+// hasPassives: 구분선 표시 여부. 미전달 시 현재 스택으로 자동 판단
+function refreshPlayerPanel(hasPassives) {
+    if (!uiPanelContent) return;
+    if (hasPassives === undefined) {
+        hasPassives = (armMuscleStack + bigStoneStack + ironBallStack
+                     + aimLineStack + basketballStack + piercingStack
+                     + shotgunStack + magnetStack + explosionStack
+                     + pickupStoneStack + lightningStack) > 0;
+    }
+    const lines = [`STAGE  ${roundNumber}`];
+    if (hasPassives) lines.push('', '── 강화 ──');
+    uiPanelContent.setText(lines.join('\n'));
+    // 패널 배경 재렌더 (높이 변경 반영)
+    if (sceneRef) drawPanelBg(sceneRef.cameras.main.zoom ?? 1.0);
+}
+
+// ─── 스테이지 시작 미션 오버레이 ─────────────────────
+function showMissionOverlay(scene) {
+    clearOverlay();
+    uiOverlay = scene.add.container(0, 0).setDepth(50).setScrollFactor(0);
+
+    const stage = STAGE_DATA[Math.min(roundNumber, STAGE_DATA.length) - 1];
+
+    mkRect(scene, uiOverlay, 0, 0, 1280, 720, 0x000000, 0.86);
+    mkPanel(scene, uiOverlay, 290, 155, 700, 410);
+
+    mkText(scene, uiOverlay, 640, 208, `STAGE  ${roundNumber}`, {
+        fontFamily: 'Arial Black', fontSize: '40px', color: '#e8a030'
+    });
+    mkText(scene, uiOverlay, 640, 272, `지구 오염도 ${roundNumber * 10}%`, {
+        fontFamily: 'Arial', fontSize: '17px', color: '#ff5533'
+    });
+
+    const div = scene.add.graphics();
+    div.lineStyle(1, 0x4a3010, 1).lineBetween(320, 302, 960, 302);
+    uiOverlay.add(div);
+
+    mkText(scene, uiOverlay, 640, 340,
+        `오염 생물 ${grandTotalBirds}마리를 전멸시켜라!\n돌멩이 ${MAX_AMMO}개로 모두 처치하면 라운드 클리어\n돌이 먼저 소진되면 게임오버!`,
+        { fontFamily: 'Arial', fontSize: '17px', color: '#cccccc', align: 'center', lineSpacing: 5 }
+    );
+
+    mkBtn(scene, uiOverlay, 640, 487, 200, 52, '시 작 !', 0xe8a030, '#000000',
+        () => { clearOverlay(); loadStone(scene); }
+    );
+}
+
+// ─── 실패 화면 (10스테이지 종료 후 잔여 생물 있을 때) ─
+function showFailure(scene) {
+    clearOverlay();
+    uiOverlay = scene.add.container(0, 0).setDepth(50).setScrollFactor(0);
+    mkRect(scene, uiOverlay, 0, 0, 1280, 720, 0x000000, 0.90);
+    mkText(scene, uiOverlay, 640, 210, '지구를 구하지 못했습니다.', {
+        fontFamily: 'Arial Black', fontSize: '52px', color: '#ff4444'
+    });
+    mkText(scene, uiOverlay, 640, 305, `남은 오염생물: ${remainingBirds}마리`, {
+        fontFamily: 'Arial', fontSize: '26px', color: '#ff9999'
+    });
+    mkText(scene, uiOverlay, 640, 358, '10 스테이지 안에 모든 생물을 처치하지 못했습니다.', {
+        fontFamily: 'Arial', fontSize: '18px', color: '#888888'
+    });
+    mkBtn(scene, uiOverlay, 640, 460, 240, 58, '메인 메뉴로', 0xff4444, '#ffffff',
+        () => goToMainMenu(scene)
+    );
+}
+
+// ─── 클리어 화면 ──────────────────────────────────────
+function showVictory(scene) {
+    clearOverlay();
+    uiOverlay = scene.add.container(0, 0).setDepth(50).setScrollFactor(0);
+    mkRect(scene, uiOverlay, 0, 0, 1280, 720, 0x000000, 0.90);
+    mkText(scene, uiOverlay, 640, 220, '임 무 완 료 !', {
+        fontFamily: 'Arial Black', fontSize: '68px', color: '#e8a030'
+    });
+    mkText(scene, uiOverlay, 640, 340, `총 처치한 새: ${totalBirdsHit}`, {
+        fontFamily: 'Arial', fontSize: '28px', color: '#ffffff'
+    });
+    mkText(scene, uiOverlay, 640, 385, '지구를 오염에서 구해냈습니다!', {
+        fontFamily: 'Arial', fontSize: '20px', color: '#aaaaaa'
+    });
+    mkBtn(scene, uiOverlay, 640, 470, 240, 56, '메인 메뉴로', 0x39ff14, '#000000',
+        () => goToMainMenu(scene)
+    );
+}
+
+function mkRect(scene, c, x, y, w, h, color, alpha) {
+    const g = scene.add.graphics();
+    g.fillStyle(color, alpha).fillRect(x, y, w, h);
+    c.add(g);
+    return g;
+}
+
+function mkPanel(scene, c, x, y, w, h) {
+    const g = scene.add.graphics();
+    g.fillStyle(0x1a1208, 1).fillRoundedRect(x, y, w, h, 20);
+    g.lineStyle(2, 0xe8a030, 1).strokeRoundedRect(x, y, w, h, 20);
+    c.add(g);
+    return g;
+}
+
+function mkText(scene, c, x, y, str, style) {
+    const t = scene.add.text(x, y, str, style).setOrigin(0.5);
+    c.add(t);
+    return t;
+}
+
+function mkBtn(scene, c, cx, cy, w, h, label, bgColor, textColor, callback, fontSize = 22) {
+    const bg = scene.add.graphics();
+    bg.fillStyle(bgColor, 1).fillRoundedRect(cx - w / 2, cy - h / 2, w, h, 10);
+    c.add(bg);
+    const txt = scene.add.text(cx, cy, label, {
+        fontFamily: 'Arial', fontSize: `${fontSize}px`, color: textColor, fontStyle: 'bold'
+    }).setOrigin(0.5);
+    c.add(txt);
+    // 스크린 좌표 기반 hit area 등록 (카메라 좌표계 버그 우회)
+    overlayHitAreas.push({ x: cx, y: cy, hw: w / 2, hh: h / 2, cb: callback });
+    // 커서 변경용 invisible rect (판정은 overlayHitAreas가 담당)
+    const hit = scene.add.rectangle(cx, cy, w, h, 0x000000, 0)
+        .setInteractive({ useHandCursor: true });
+    c.add(hit);
+    return hit;
+}
+
+function drawCard(g, cx, cy, w, h, fill, stroke, strokeW) {
+    g.fillStyle(fill, 1).fillRoundedRect(cx - w / 2, cy - h / 2, w, h, 16);
+    g.lineStyle(strokeW, stroke, 1).strokeRoundedRect(cx - w / 2, cy - h / 2, w, h, 16);
+}
+
+let uiMaterialText   = null;
+let uiRemainingText  = null;   // 하단 중앙 '남은 오염 생물들 = N마리'
+
+// ─── 씬 등록 & 게임 실행 ──────────────────────────────
+const game = new Phaser.Game({
+    ...config,
+    scene: [
+        ClickToStartScene,
+        IntroScene,
+        { key: 'GameScene', preload, create, update }
+    ]
+});
+</script>
+</body>
+</html>

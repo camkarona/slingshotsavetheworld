@@ -1,0 +1,7 @@
+# 내부 메모 / 구버전 파일 제외
+devlog/
+old data/
+
+# OS 파일
+.DS_Store
+Thumbs.db
