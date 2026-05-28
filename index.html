@@ -6,7 +6,7 @@
     <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
     <style>
         body { margin: 0; background: radial-gradient(ellipse at center, #1a1206 0%, #0a0804 60%, #050402 100%); display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; }
-        canvas { box-shadow: 0 0 55px rgba(232,160,40,0.28), 0 0 120px rgba(232,120,20,0.12), 0 0 6px rgba(255,200,80,0.35); border-radius: 2px; }
+        canvas { border-radius: 2px; }
     </style>
 </head>
 <body>
@@ -20,8 +20,8 @@ const config = {
     width: 1280,
     height: 720,
     backgroundColor: '#0e0b06',
-    antialias: true,
-    antialiasGL: true,
+    antialias: false,
+    antialiasGL: false,
     scale: {
         mode: Phaser.Scale.FIT,
         autoCenter: Phaser.Scale.CENTER_BOTH,
@@ -362,7 +362,7 @@ class ClickToStartScene extends Phaser.Scene {
         // CLICK TO START
         const ct = this.add.text(W / 2, 385, 'CLICK  TO  START', {
             fontFamily: '"Arial Black", Arial', fontSize: '50px',
-            color: '#ffffff', stroke: '#4af0c8', strokeThickness: 3
+            color: '#ffffff', stroke: '#4af0c8', strokeThickness: 2
         }).setOrigin(0.5);
         this.tweens.add({
             targets: ct, alpha: 0.1, duration: 950,
@@ -535,7 +535,7 @@ class IntroScene extends Phaser.Scene {
         menuDefs.forEach((d, i) => {
             const btn = this.add.text(W / 2, d.y + 30, d.label, {
                 fontFamily: '"Arial Black", Arial', fontSize: d.size,
-                color: d.col, stroke: '#000000', strokeThickness: 3
+                color: d.col, stroke: '#000000', strokeThickness: 2
             }).setOrigin(0.5).setAlpha(0).setDepth(10).setInteractive({ useHandCursor: true });
             btn.on('pointerover', () => { if (!this.modalOpen) btn.setColor(d.hover); });
             btn.on('pointerout',  () => { if (!this.modalOpen) btn.setColor(d.col);   });
@@ -794,7 +794,7 @@ class IntroScene extends Phaser.Scene {
         // 제목 + 부제
         panel.add(this.add.text(W / 2, 30, '🛠  DEV MODE  —  강화 직접 설정', {
             fontFamily: 'Courier New, monospace', fontSize: '20px', color: '#44ff88',
-            stroke: '#000', strokeThickness: 3
+            stroke: '#000', strokeThickness: 2
         }).setOrigin(0.5));
         panel.add(this.add.text(W / 2, 54, '※ 실제 게임: 기증 후 랜덤 선택', {
             fontFamily: 'Arial', fontSize: '10px', color: '#445544'
@@ -1486,7 +1486,7 @@ function create() {
     // 텍스트
     uiResearchBtnTxt = this.add.text(1200, 20, '🔬  박사님 연구', {
         fontFamily: 'Arial Black', fontSize: '15px', color: '#ffdd44',
-        stroke: '#000000', strokeThickness: 3,
+        stroke: '#000000', strokeThickness: 2,
         shadow: { offsetX: 0, offsetY: 0, color: '#ffaa00', blur: 8, fill: true }
     }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(11).setInteractive({ useHandCursor: true });
     // 버튼 배경 그리기 함수 (활성/호버 + zoom 보정 공용)
@@ -1555,7 +1555,7 @@ function create() {
         fontSize: '14px',
         color: '#ffdd55',
         stroke: '#000000',
-        strokeThickness: 3,
+        strokeThickness: 2,
         align: 'center'
     }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(10);
     refreshRemainingHUD();
@@ -2313,7 +2313,7 @@ function drawKickChargeBar() {
     if (!uiKickChargeLabel) {
         uiKickChargeLabel = sceneRef.add.text(0, 0, 'POWER', {
             fontFamily: '"Arial Black", Arial', fontSize: '11px', color: '#ffffff',
-            stroke: '#000000', strokeThickness: 3,
+            stroke: '#000000', strokeThickness: 2,
         }).setOrigin(0.5, 1).setDepth(16);
     }
     uiKickChargeLabel.setPosition(cx, cy - 2);
@@ -3256,7 +3256,7 @@ function spawnNukeEffect(scene, x, y) {
         fontSize: '84px',
         color: '#ffee00',
         stroke: '#aa0000',
-        strokeThickness: 12,
+        strokeThickness: 2,
     }).setOrigin(0.5).setScrollFactor(0).setDepth(31);
 
     subtitle.setAlpha(0).setScale(0.25);
@@ -3519,7 +3519,7 @@ function spawnDimensionalRift(scene, x, y) {
         fontSize: '64px',
         color: '#cc66ff',
         stroke: '#001144',
-        strokeThickness: 9,
+        strokeThickness: 2,
     }).setOrigin(0.5).setScrollFactor(0).setDepth(31);
     subtitle.setAlpha(0).setScale(0.3);
     scene.tweens.add({ targets: subtitle, alpha: 1, scaleX: 1.15, scaleY: 1.15,
@@ -3800,7 +3800,7 @@ function showRecycleSubtitle(scene) {
         fontSize: '26px',
         color: '#aaffcc',
         stroke: '#000000',
-        strokeThickness: 4,
+        strokeThickness: 2,
     }).setOrigin(0.5).setScrollFactor(0).setDepth(50);
 
     subtitle.setAlpha(0).setScale(0.6);
@@ -4046,7 +4046,7 @@ function triggerTimeStop(scene) {
         fontSize: '34px',
         color: '#ccddff',
         stroke: '#1a3a6a',
-        strokeThickness: 5,
+        strokeThickness: 2,
     }).setOrigin(0.5).setScrollFactor(0).setDepth(29);
     label.setAlpha(0).setScale(0.6);
     scene.tweens.add({ targets: label, alpha: 1, scale: 1,
@@ -4538,7 +4538,7 @@ function showGameOver(scene, victory) {
         fontFamily: 'Arial Black', fontSize: '64px',
         color: victory ? '#39ff14' : '#ff4444',
         stroke: victory ? '#005500' : '#880000',
-        strokeThickness: 4
+        strokeThickness: 2
     });
     mkText(scene, uiOverlay, 640, 132,
         `처치한 적 : ${totalBirdsHit}마리   |   보유 특수물질 ${materialStock}g`, {
@@ -5178,7 +5178,7 @@ function showKillFx(scene, worldX, worldY, material, textureKey) {
             fontSize: '34px',
             color: '#39ff14',
             stroke: '#003300',
-            strokeThickness: 5,
+            strokeThickness: 2,
         }
     ).setOrigin(0.5).setDepth(18).setScale(1.5).setAlpha(1);
 
@@ -5189,7 +5189,7 @@ function showKillFx(scene, worldX, worldY, material, textureKey) {
             fontSize: '14px',
             color: '#aaffaa',
             stroke: '#001100',
-            strokeThickness: 3,
+            strokeThickness: 2,
         }
     ).setOrigin(0.5).setDepth(18).setAlpha(0.9);
 
@@ -5223,7 +5223,7 @@ function showKillFx(scene, worldX, worldY, material, textureKey) {
                 fontSize: '22px',
                 color: '#ffcc44',
                 stroke: '#3a1f00',
-                strokeThickness: 5,
+                strokeThickness: 2,
             }
         ).setOrigin(0.5).setDepth(18).setAlpha(0).setScale(0.6);
         // 등장 (Back.Out으로 살짝 튕김)
@@ -5261,7 +5261,7 @@ function showKillNotification(scene, textureKey, material) {
         {
             fontFamily: 'Arial Black', fontSize: '22px',
             color: '#39ff14', align: 'center',
-            stroke: '#000000', strokeThickness: 3,
+            stroke: '#000000', strokeThickness: 2,
             lineSpacing: 8,
         }
     ).setOrigin(0.5).setScrollFactor(0).setDepth(15).setAlpha(0);
