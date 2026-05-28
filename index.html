@@ -387,6 +387,14 @@ class ClickToStartScene extends Phaser.Scene {
 class IntroScene extends Phaser.Scene {
     constructor() { super({ key: 'IntroScene' }); }
 
+    // GameScene 텍스처 생성을 미리 트리거 (인트로에서 실제 새들 사용)
+    preload() {
+        // preload 는 GameScene용 전역 함수 — 텍스처만 생성하므로 안전하게 재사용
+        if (!this.textures.exists('mothBird')) {
+            preload.call(this);
+        }
+    }
+
     create() {
         const W = 1280, H = 720;
         this.W = W; this.H = H;
@@ -394,8 +402,6 @@ class IntroScene extends Phaser.Scene {
         this.stoneFlying = false;
         this.stoneVX = 0; this.stoneVY = 0;
         this.particles   = [];
-        this.birdAlive   = true;
-        this.birdRespawnTimer = 0;
 
         // ── 배경 ────────────────────────────────────────
         const bg = this.add.graphics();
@@ -410,20 +416,20 @@ class IntroScene extends Phaser.Scene {
         bg.lineStyle(1, 0x182818, 0.8).lineBetween(0, 612, W, 612);
 
         // ── 타이틀 ──────────────────────────────────────
-        // 글로우 레이어 (그림자)
+        // 글로우 레이어 (그림자) — depth 10 으로 새들 위에
         this.add.text(W / 2 + 2, 84, 'THE SLINGSHOT TO RESCUE WORLD', {
             fontFamily: '"Arial Black", Arial', fontSize: '44px', color: '#042e28'
-        }).setOrigin(0.5);
+        }).setOrigin(0.5).setDepth(10);
 
         const titleT = this.add.text(W / 2, 82, 'THE SLINGSHOT TO RESCUE WORLD', {
             fontFamily: '"Arial Black", Arial', fontSize: '44px', color: '#4af0c8'
-        }).setOrigin(0.5).setAlpha(0);
+        }).setOrigin(0.5).setAlpha(0).setDepth(10);
 
         const subT = this.add.text(W / 2, 148, '세상을 구하는 새 총', {
             fontFamily: '"Arial Black", Arial', fontSize: '29px', color: '#e8e8e8'
-        }).setOrigin(0.5).setAlpha(0);
+        }).setOrigin(0.5).setAlpha(0).setDepth(10);
 
-        const divG = this.add.graphics().setAlpha(0);
+        const divG = this.add.graphics().setAlpha(0).setDepth(10);
         divG.lineStyle(1, 0x4af0c8, 0.35).lineBetween(380, 190, 900, 190);
 
         // ── 인트로 BGM 시작 ─────────────────────────────────
@@ -448,7 +454,7 @@ class IntroScene extends Phaser.Scene {
         this.pL  = { x: 148, y: 496 };             // 왼쪽 갈래
         this.pR  = { x: 192, y: 496 };             // 오른쪽 갈래
 
-        const slg = this.add.graphics();
+        const slg = this.add.graphics().setDepth(2);
         slg.lineStyle(14, 0x8B4513, 1).lineBetween(this.sX, this.sY + 20, this.sX, 612);
         slg.lineStyle(10, 0x8B4513, 1);
         slg.lineBetween(this.sX, this.sY + 10, this.pL.x, this.pL.y);
@@ -457,21 +463,65 @@ class IntroScene extends Phaser.Scene {
         for (let y = this.sY + 30; y < 610; y += 20)
             slg.lineBetween(this.sX - 5, y, this.sX + 5, y + 4);
 
-        this.bandG = this.add.graphics().setDepth(1);
+        this.bandG = this.add.graphics().setDepth(3);
 
-        // 돌멩이
-        this.stone   = this.add.circle(this.sX, this.sY, 9, 0x95a5a6).setDepth(2);
-        this.stoneHL = this.add.circle(this.sX - 3, this.sY - 3, 3, 0xddeedd, 0.65).setDepth(3);
+        // 돌멩이 — 새들(depth 1) 위에 렌더
+        this.stone   = this.add.circle(this.sX, this.sY, 9, 0x95a5a6).setDepth(4);
+        this.stoneHL = this.add.circle(this.sX - 3, this.sY - 3, 3, 0xddeedd, 0.65).setDepth(5);
 
-        // 목표 새 (사각형 실루엣 + 눈)
-        this.birdBody = this.add.rectangle(820, 318, 38, 22, 0x4a2c2c).setDepth(1);
-        this.birdBody.birdVX = -58;
-        this.birdEye  = this.add.circle(834, 311, 5, 0xff3030).setDepth(2);
+        // ── 인게임 새들 (5종, 고도별 무작위 비행) ────────────
+        this.birds = [];
+        const INTRO_BIRD_DEFS = [
+            { key: 'mothBird',  count: 3, zoneY: [560, 595], speed: [25, 50],   scale: 0.50 },
+            { key: 'droneBird', count: 2, zoneY: [380, 470], speed: [50, 90],   scale: 0.50 },
+            { key: 'mechBird',  count: 3, zoneY: [200, 320], speed: [80, 150],  scale: 0.50 },
+            { key: 'redBird',   count: 2, zoneY: [220, 340], speed: [120, 220], scale: 0.50 },
+            { key: 'eagle',     count: 1, zoneY: [110, 200], speed: [160, 260], scale: 0.72 },
+        ];
+        INTRO_BIRD_DEFS.forEach(def => {
+            for (let i = 0; i < def.count; i++) {
+                const x = Phaser.Math.Between(340, 1180);
+                const y = Phaser.Math.Between(def.zoneY[0], def.zoneY[1]);
+                const bird = this.add.image(x, y, def.key).setDepth(1).setScale(def.scale);
+                bird.vx = Phaser.Math.Between(def.speed[0], def.speed[1]) * (Math.random() < 0.5 ? -1 : 1);
+                bird.isAlive = true;
+                bird.respawnTimer = 0;
+                bird.zoneY = def.zoneY;
+                bird.minX = 320;
+                bird.maxX = 1240;
+                bird.baseSpeedMin = def.speed[0];
+                bird.baseSpeedMax = def.speed[1];
+                // 부드러운 상하 부유
+                this.tweens.add({
+                    targets: bird,
+                    y: y + Phaser.Math.Between(-12, 12),
+                    duration: Phaser.Math.Between(1200, 2400),
+                    yoyo: true, repeat: -1, ease: 'Sine.InOut'
+                });
+                this.birds.push(bird);
+            }
+        });
 
-        this.fxG = this.add.graphics().setDepth(5);
+        // ── 발사 패턴 풀 (높이쏨/낮게/실수/등등) ──────────────
+        this.firePatterns = [
+            // 정상 명중 시도 — 강한 표준 발사
+            { name: 'normal',  pull: { dx: -78,  dy: 32 }, hold: 580, scale: 7.8 },
+            // 강하게 멀리 — 더 많이 당김
+            { name: 'strong',  pull: { dx: -118, dy: 48 }, hold: 720, scale: 8.2 },
+            // 높이 쏘기 — 위쪽으로 큰 호 (수직 드래그)
+            { name: 'high',    pull: { dx: -42,  dy: 88 }, hold: 700, scale: 7.6 },
+            // 낮게 쏘기 — 수평에 가까운 빠른 발사
+            { name: 'low',     pull: { dx: -108, dy: 12 }, hold: 620, scale: 8.0 },
+            // 실수 — 약하게 (살짝 당기다 놓음)
+            { name: 'miss',    pull: { dx: -34,  dy: 22 }, hold: 360, scale: 5.5 },
+            // 초강력 슈팅 — 풀로 당김
+            { name: 'mega',    pull: { dx: -135, dy: 60 }, hold: 850, scale: 8.6 },
+        ];
+
+        this.fxG = this.add.graphics().setDepth(6);
 
         // 첫 발사 대기
-        this.time.delayedCall(900, () => this.pullBack());
+        this.time.delayedCall(900, () => this.nextShot());
 
         // ── 메뉴 버튼 ───────────────────────────────────
         const menuDefs = [
@@ -485,7 +535,7 @@ class IntroScene extends Phaser.Scene {
             const btn = this.add.text(W / 2, d.y + 30, d.label, {
                 fontFamily: '"Arial Black", Arial', fontSize: d.size,
                 color: d.col, stroke: '#000000', strokeThickness: 3
-            }).setOrigin(0.5).setAlpha(0).setInteractive({ useHandCursor: true });
+            }).setOrigin(0.5).setAlpha(0).setDepth(10).setInteractive({ useHandCursor: true });
             btn.on('pointerover', () => { if (!this.modalOpen) btn.setColor(d.hover); });
             btn.on('pointerout',  () => { if (!this.modalOpen) btn.setColor(d.col);   });
             btn.on('pointerup',   () => { if (!this.modalOpen) d.cb();                });
@@ -497,7 +547,7 @@ class IntroScene extends Phaser.Scene {
         // ── DEV MODE 버튼 (우하단, 작게) ────────────────
         const devBtn = this.add.text(W - 24, H - 16, '[ DEV MODE ]', {
             fontFamily: 'Courier New, monospace', fontSize: '13px', color: '#334433'
-        }).setOrigin(1, 1).setInteractive({ useHandCursor: true });
+        }).setOrigin(1, 1).setDepth(10).setInteractive({ useHandCursor: true });
         devBtn.on('pointerover', () => devBtn.setColor('#44ff88'));
         devBtn.on('pointerout',  () => devBtn.setColor('#334433'));
         devBtn.on('pointerup',   () => { if (!this.modalOpen) this.openDevMode(); });
@@ -505,17 +555,27 @@ class IntroScene extends Phaser.Scene {
         // ── 하단 크레딧 ─────────────────────────────────
         this.add.text(W / 2, 712, 'Developed by  Karona Games', {
             fontFamily: 'Arial', fontSize: '14px', color: '#2a3c3c'
-        }).setOrigin(0.5, 1);
+        }).setOrigin(0.5, 1).setDepth(10);
     }
 
-    // ── 새총 당기기 ──────────────────────────────────────
+    // ── 다음 발사 패턴 선택 ──────────────────────────────
+    nextShot() {
+        if (!this.stone) return;
+        this.currentPattern = Phaser.Math.RND.pick(this.firePatterns);
+        this.pullBack();
+    }
+
+    // ── 새총 당기기 (패턴에 따라 다른 거리·시간) ────────
     pullBack() {
         if (!this.stone) return;
+        const p = this.currentPattern;
         this.tweens.add({
             targets: [this.stone, this.stoneHL],
-            x: this.sX - 62, y: this.sY + 36,
-            duration: 680, ease: 'Power2.easeOut',
-            onComplete: () => this.time.delayedCall(300, () => this.release())
+            x: this.sX + p.pull.dx,
+            y: this.sY + p.pull.dy,
+            duration: p.hold,
+            ease: 'Quad.Out',
+            onComplete: () => this.time.delayedCall(180 + Math.random() * 220, () => this.release())
         });
     }
 
@@ -524,36 +584,67 @@ class IntroScene extends Phaser.Scene {
         if (!this.stone) return;
         const dx = this.sX - this.stone.x, dy = this.sY - this.stone.y;
         const ang = Math.atan2(dy, dx);
-        this.stoneVX = Math.cos(ang) * Math.hypot(dx, dy) * 7.2;
-        this.stoneVY = Math.sin(ang) * Math.hypot(dx, dy) * 7.2;
+        const dist = Math.hypot(dx, dy);
+        const scale = this.currentPattern.scale;
+        this.stoneVX = Math.cos(ang) * dist * scale;
+        this.stoneVY = Math.sin(ang) * dist * scale;
         this.stoneFlying = true;
     }
 
     // ── 새 명중 이펙트 ───────────────────────────────────
     hitEffect(x, y) {
-        if (!this.birdBody) return;
-        this.birdAlive = false;
-        this.birdBody.setVisible(false);
-        this.birdEye.setVisible(false);
-        for (let i = 0; i < 14; i++) {
+        for (let i = 0; i < 18; i++) {
             const ang = Math.random() * Math.PI * 2;
-            const spd = 90 + Math.random() * 210;
+            const spd = 100 + Math.random() * 230;
             this.particles.push({
                 x, y,
                 vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd - 50,
                 life: 1.0, decay: 1.0 + Math.random() * 0.6,
-                color: [0x39ff14, 0xff4444, 0xffaa00][Phaser.Math.Between(0, 2)],
+                color: [0x39ff14, 0xff4444, 0xffaa00, 0xffee88][Phaser.Math.Between(0, 3)],
                 size: 3 + Math.random() * 5
             });
         }
-        this.birdRespawnTimer = 2.2;
+    }
+
+    // ── 돌 리셋 후 다음 발사 예약 ────────────────────────
+    resetStone(delay) {
+        this.stone.setPosition(this.sX, this.sY);
+        this.stoneHL.setPosition(this.sX - 3, this.sY - 3);
+        this.stoneFlying = false;
+        this.time.delayedCall(delay, () => this.nextShot());
     }
 
     update(time, delta) {
         if (!this.stone) return;
         const dt = delta / 1000;
 
-        // 돌멩이 비행
+        // 새 이동 + 경계 반사 + 리스폰
+        if (this.birds) {
+            this.birds.forEach(b => {
+                if (b.isAlive) {
+                    b.x += b.vx * dt;
+                    // 방향에 따라 스프라이트 flip (왼쪽 갈때 좌우반전)
+                    b.setFlipX(b.vx < 0);
+                    if (b.x < b.minX) { b.x = b.minX; b.vx =  Math.abs(b.vx); }
+                    if (b.x > b.maxX) { b.x = b.maxX; b.vx = -Math.abs(b.vx); }
+                } else {
+                    b.respawnTimer -= dt;
+                    if (b.respawnTimer <= 0) {
+                        b.isAlive = true;
+                        // 좌우 끝에서 등장
+                        const fromLeft = Math.random() < 0.5;
+                        b.x = fromLeft ? b.minX + 5 : b.maxX - 5;
+                        b.y = Phaser.Math.Between(b.zoneY[0], b.zoneY[1]);
+                        const speedMag = Phaser.Math.Between(b.baseSpeedMin, b.baseSpeedMax);
+                        b.vx = fromLeft ? speedMag : -speedMag;
+                        b.setVisible(true).setAlpha(0).setScale(b.scaleX);
+                        this.tweens.add({ targets: b, alpha: 1, duration: 400 });
+                    }
+                }
+            });
+        }
+
+        // 돌멩이 비행 (중력 + 명중 / 화면 밖)
         if (this.stoneFlying) {
             this.stone.x   += this.stoneVX * dt;
             this.stone.y   += this.stoneVY * dt;
@@ -561,46 +652,30 @@ class IntroScene extends Phaser.Scene {
             this.stoneHL.x  = this.stone.x - 3;
             this.stoneHL.y  = this.stone.y - 3;
 
-            // 새 명중 판정
-            if (this.birdAlive && this.birdBody && this.birdBody.visible) {
-                if (Math.hypot(this.stone.x - this.birdBody.x, this.stone.y - this.birdBody.y) < 34) {
-                    this.hitEffect(this.birdBody.x, this.birdBody.y);
-                    this.stone.setPosition(this.sX, this.sY);
-                    this.stoneHL.setPosition(this.sX - 3, this.sY - 3);
-                    this.stoneFlying = false;
-                    this.time.delayedCall(1400, () => this.pullBack());
+            // 새 명중 판정 (가장 가까운 살아있는 새 확인)
+            let hitBird = null;
+            for (const b of this.birds) {
+                if (!b.isAlive) continue;
+                const hitR = (b.texture && b.texture.key === 'eagle') ? 28 : 22;
+                if (Math.hypot(this.stone.x - b.x, this.stone.y - b.y) < hitR) {
+                    hitBird = b; break;
                 }
             }
-            // 화면 밖으로
-            if (this.stone.x > 1420 || this.stone.y > 820) {
-                this.stone.setPosition(this.sX, this.sY);
-                this.stoneHL.setPosition(this.sX - 3, this.sY - 3);
-                this.stoneFlying = false;
-                this.time.delayedCall(1100, () => this.pullBack());
+            if (hitBird) {
+                this.hitEffect(hitBird.x, hitBird.y);
+                hitBird.isAlive = false;
+                hitBird.setVisible(false);
+                hitBird.respawnTimer = 2.0 + Math.random() * 2.5;
+                this.resetStone(700 + Math.random() * 600);
+            }
+            // 화면 밖 (실패 / 멀리 / 위로 너무 높게)
+            else if (this.stone.x > 1420 || this.stone.x < -50
+                  || this.stone.y > 820 || this.stone.y < -250) {
+                this.resetStone(900 + Math.random() * 500);
             }
         }
 
-        // 새 이동
-        if (this.birdBody && this.birdAlive) {
-            this.birdBody.x += this.birdBody.birdVX * dt;
-            this.birdEye.x   = this.birdBody.x + 14;
-            this.birdEye.y   = this.birdBody.y - 6;
-            if (this.birdBody.x < 440)  this.birdBody.birdVX =  Math.abs(this.birdBody.birdVX);
-            if (this.birdBody.x > 1080) this.birdBody.birdVX = -Math.abs(this.birdBody.birdVX);
-        }
-
-        // 새 리스폰
-        if (!this.birdAlive) {
-            this.birdRespawnTimer -= dt;
-            if (this.birdRespawnTimer <= 0) {
-                this.birdAlive = true;
-                const nx = Phaser.Math.Between(480, 950), ny = Phaser.Math.Between(270, 420);
-                this.birdBody.setPosition(nx, ny).setVisible(true);
-                this.birdEye.setPosition(nx + 14, ny - 6).setVisible(true);
-            }
-        }
-
-        // 고무줄
+        // 고무줄 (당기는 동안만)
         this.bandG.clear();
         if (!this.stoneFlying) {
             this.bandG.lineStyle(4, 0xD2691E, 1);
