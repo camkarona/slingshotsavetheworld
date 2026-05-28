@@ -232,6 +232,7 @@ let slingModStack      = 0;  // 높이개조 (NORMAL): 새총 높이 증가 (스
 let timeStopStack      = 0;  // 시간정지 (NORMAL): 발사 후 모든 적 정지
 let dispatchStack      = 0;  // 파견 (NORMAL): 명중 위치(x)로 다음 턴 슬링샷 이동
 let pendingDispatchX   = null;  // 파견 대기 위치 — wipeReturn 시 적용
+let _dispatchTraces    = [];    // 파견으로 떠난 자리에 남은 흙 자국 그래픽 모음
 let dungBallStack      = 0;  // 똥볼 (NORMAL): 새총→축구선수, 위쪽 호 발사
 let _kickerLegAngle    = 0;  // 똥볼 다리 각도 (0=서있음, 1.2=차는 중)
 let _kickerTween       = null;
@@ -1289,6 +1290,17 @@ function preload() {
 
 // ─── create ───────────────────────────────────────────
 function create() {
+    // ─── 새 게임 시작 시 슬링샷 위치 원복 ───────────────────
+    // 직전 게임에서 '파견' 등으로 이동된 위치가 남아있으면 카메라가 잘못된 곳에서 시작됨
+    const xReset = 320 - SLING_CENTER.x;
+    if (Math.abs(xReset) > 0.5) {
+        SLING_CENTER.x += xReset;
+        PRONG_L.x      += xReset;
+        PRONG_R.x      += xReset;
+    }
+    pendingDispatchX = null;     // 보류된 파견 이동도 클리어
+    clearDispatchTraces();        // 파견 자국 흙 그래픽 제거 (있다면)
+
     // 물리 월드 범위 — 세로를 축소하여 Arcade physics 연산 비용 절감
     this.physics.world.setBounds(0, -1200, WORLD_W, 2200);
     this.cameras.main.setBounds(0, WORLD_TOP, WORLD_LIMIT_X + 80, WORLD_H);
@@ -2231,6 +2243,40 @@ function applySlingHeight() {
     }
 }
 
+// ─── 파견 자국 — 떠난 자리에 흙 파인 흔적 남김 ─────────
+function spawnDirtTrace(scene, x) {
+    if (!scene) return;
+    const baseY = 720;
+    const g = scene.add.graphics().setDepth(-1);   // 슬링샷 아래 (지면 위)
+
+    // 가장 어두운 구덩이 (검정 흙)
+    g.fillStyle(0x0a0502, 0.95).fillEllipse(x, baseY - 4, 64, 16);
+    g.fillStyle(0x2a1810, 0.85).fillEllipse(x, baseY - 5, 52, 12);
+    g.fillStyle(0x070300, 1   ).fillEllipse(x, baseY - 7, 32, 7);
+
+    // 가장자리 살짝 밝은 흙 (튀어나온 흙더미)
+    g.lineStyle(2, 0x553a20, 0.75).strokeEllipse(x, baseY - 4, 64, 16);
+
+    // 작은 흙덩이 점들 (주변에 흩어진 파편)
+    for (let i = 0; i < 10; i++) {
+        const px = x + Phaser.Math.Between(-38, 38);
+        const py = baseY - Phaser.Math.Between(1, 7);
+        const size = Phaser.Math.Between(2, 4);
+        const col = Phaser.Math.RND.pick([0x3a2010, 0x2a1808, 0x553a20, 0x1a0d05]);
+        g.fillStyle(col, 0.92).fillRect(px - size/2, py - size/2, size, size);
+    }
+
+    // 폴 박혔던 자리 (좁고 깊은 가운데 검정 줄)
+    g.fillStyle(0x000000, 0.95).fillRect(x - 6, baseY - 4, 12, 6);
+
+    _dispatchTraces.push(g);
+}
+
+function clearDispatchTraces() {
+    _dispatchTraces.forEach(g => { if (g && g.destroy) g.destroy(); });
+    _dispatchTraces = [];
+}
+
 // ─── 파견 (NORMAL): 명중 위치로 슬링샷 이동 ─────────────
 // hitBird 에서 pendingDispatchX 가 설정되면 wipeReturn 시 적용
 function applyPendingDispatch() {
@@ -2241,6 +2287,9 @@ function applyPendingDispatch() {
 
     const dx = newX - SLING_CENTER.x;
     if (Math.abs(dx) < 0.5) return;   // 사실상 이동 없음
+
+    // 떠나기 전 위치에 흙 파인 흔적 남김 (영구 — 다음 라운드/새 게임 때까지)
+    spawnDirtTrace(sceneRef, SLING_CENTER.x);
 
     SLING_CENTER.x += dx;
     PRONG_L.x      += dx;
@@ -4875,11 +4924,12 @@ function restartGame(scene) {
     pendingDispatchX   = null;
     dungBallStack      = 0;
     twinStack          = 0;
-    // 슬링샷 x 위치 원복 (파견으로 이동된 경우 복귀)
+    // 슬링샷 x 위치 원복 (파견으로 이동된 경우 복귀) + 파견 자국 모두 제거
     const xReset = 320 - SLING_CENTER.x;
     SLING_CENTER.x += xReset;
     PRONG_L.x      += xReset;
     PRONG_R.x      += xReset;
+    clearDispatchTraces();
     applySlingHeight();   // 새총 높이 원복 + redraw
     redrawTwinStand();    // 쌍둥이 새총 숨김
     redrawKicker();       // 축구선수 숨김
