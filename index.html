@@ -551,7 +551,7 @@ class IntroScene extends Phaser.Scene {
         }).setOrigin(1, 1).setDepth(10).setInteractive({ useHandCursor: true });
         devBtn.on('pointerover', () => devBtn.setColor('#44ff88'));
         devBtn.on('pointerout',  () => devBtn.setColor('#334433'));
-        devBtn.on('pointerup',   () => { if (!this.modalOpen) this.openDevMode(); });
+        devBtn.on('pointerup',   () => { if (!this.modalOpen) this.openDevModePrompt(); });
 
         // ── 하단 크레딧 ─────────────────────────────────
         this.add.text(W / 2, 712, 'Developed by  Karona Games', {
@@ -696,6 +696,86 @@ class IntroScene extends Phaser.Scene {
                 return true;
             });
         }
+    }
+
+    // ── 개발자 모드 암호 입력 (HTML 오버레이) ──────────
+    openDevModePrompt() {
+        if (this.modalOpen) return;
+        this.modalOpen = true;
+
+        // 기존 오버레이 제거
+        const oldOvl = document.getElementById('sling-dev-pw-overlay');
+        if (oldOvl) oldOvl.remove();
+
+        const div = document.createElement('div');
+        div.id = 'sling-dev-pw-overlay';
+        div.style.cssText = [
+            'position:fixed', 'top:50%', 'left:50%',
+            'transform:translate(-50%,-50%)',
+            'background:#0a1208', 'border:2px solid #44ff88',
+            'border-radius:14px', 'padding:32px 44px',
+            'z-index:9999', 'text-align:center',
+            'font-family:"Arial Black",Arial,sans-serif',
+            'color:#ffffff', 'min-width:340px',
+            'box-shadow:0 0 40px rgba(68,255,136,0.4)'
+        ].join(';');
+
+        div.innerHTML = `
+            <div style="font-size:18px;margin-bottom:6px;color:#44ff88">🛠  DEV MODE</div>
+            <div style="font-size:13px;color:#888;margin-bottom:18px">암호를 입력하시오</div>
+            <input id="sling-dev-pw" type="password" maxlength="20" autocomplete="off"
+                placeholder="password"
+                style="font-size:20px;padding:10px 16px;border-radius:7px;
+                       border:1.5px solid #44ff88;background:#0a1808;
+                       color:#fff;width:220px;text-align:center;outline:none;
+                       font-family:Arial Black,sans-serif;letter-spacing:6px;">
+            <div id="sling-dev-pw-msg" style="margin-top:10px;font-size:12px;color:#ff4444;height:14px"></div>
+            <div style="margin-top:14px;display:flex;gap:12px;justify-content:center">
+                <button id="sling-dev-pw-ok" style="font-size:15px;padding:10px 30px;
+                    background:#44ff88;color:#000;border:none;border-radius:7px;
+                    cursor:pointer;font-family:Arial Black,Arial">확 인</button>
+                <button id="sling-dev-pw-cancel" style="font-size:15px;padding:10px 24px;
+                    background:#334455;color:#aaa;border:none;border-radius:7px;
+                    cursor:pointer;font-family:Arial,sans-serif">취소</button>
+            </div>`;
+        document.body.appendChild(div);
+
+        const inp = document.getElementById('sling-dev-pw');
+        inp.focus();
+
+        const close = () => {
+            const d = document.getElementById('sling-dev-pw-overlay');
+            if (d) d.remove();
+            this.modalOpen = false;
+        };
+
+        const tryEnter = () => {
+            if (inp.value === '2234') {
+                close();
+                this.openDevMode();
+            } else {
+                const msg = document.getElementById('sling-dev-pw-msg');
+                msg.textContent = '❌ 암호가 틀렸습니다';
+                inp.value = '';
+                inp.focus();
+                // 입력창 흔들기 (shake 애니메이션)
+                inp.animate([
+                    { transform: 'translateX(0)' },
+                    { transform: 'translateX(-8px)' },
+                    { transform: 'translateX(8px)' },
+                    { transform: 'translateX(-6px)' },
+                    { transform: 'translateX(6px)' },
+                    { transform: 'translateX(0)' },
+                ], { duration: 320 });
+            }
+        };
+
+        document.getElementById('sling-dev-pw-ok').onclick     = tryEnter;
+        document.getElementById('sling-dev-pw-cancel').onclick = close;
+        inp.addEventListener('keydown', e => {
+            if (e.key === 'Enter')  tryEnter();
+            if (e.key === 'Escape') close();
+        });
     }
 
     // ── 게임 시작 ────────────────────────────────────────
