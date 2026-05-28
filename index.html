@@ -1236,12 +1236,29 @@ function preload() {
     sg.generateTexture('stone', 30, 30);
     sg.destroy();
 
+    // 기계 변이 새 — 흰색·회색·검정 + 녹색 눈 (어두운 배경과 강한 대비)
     const mg = this.make.graphics({ add: false });
-    // 후광 (배경에서 떠보이도록 — 시원한 청록빛)
-    mg.fillStyle(0xaaffcc, 0.18).fillEllipse(25, 25, 48, 36);
-    mg.fillStyle(0x34495e, 1).fillRect(0, 10, 50, 30);
-    mg.fillStyle(0x2c3e50, 1).fillRect(15, 0, 20, 10).fillRect(15, 40, 20, 10);
-    mg.fillStyle(0x39ff14, 1).fillCircle(40, 25, 6);
+    // 후광 — 청록빛 (기계 + 녹색 눈 테마)
+    mg.fillStyle(0xaaffcc, 0.22).fillEllipse(25, 25, 48, 36);
+    // ── 본체 (밝은 회색) ──
+    mg.fillStyle(0xe0e0e0, 1).fillRect(0, 13, 50, 24);
+    // 윗 하이라이트 (순백 띠)
+    mg.fillStyle(0xffffff, 1).fillRect(2, 14, 46, 4);
+    // 아래 그림자 (어두운 회색 띠)
+    mg.fillStyle(0x6a6a6a, 1).fillRect(0, 30, 50, 7);
+    // ── 날개 (검정, 위·아래) ──
+    mg.fillStyle(0x1a1a1a, 1).fillRect(12,  0, 26, 13);
+    mg.fillStyle(0x1a1a1a, 1).fillRect(12, 37, 26, 13);
+    // 날개 안쪽 띠 (회색 — 기계 패널감)
+    mg.fillStyle(0x555555, 1).fillRect(12, 10, 26, 3);
+    mg.fillStyle(0x555555, 1).fillRect(12, 37, 26, 3);
+    // ── 본체 패널 라인 (검정 세로 디테일) ──
+    mg.fillStyle(0x222222, 1).fillRect(15, 17, 2, 16);
+    mg.fillStyle(0x222222, 1).fillRect(30, 17, 2, 16);
+    // ── 녹색 눈 (전방 센서) ──
+    mg.fillStyle(0x000000, 1).fillCircle(42, 25, 6);     // 검정 베젤
+    mg.fillStyle(0x39ff14, 1).fillCircle(42, 25, 4.5);   // 녹색 렌즈
+    mg.fillStyle(0xaaffaa, 1).fillCircle(41, 24, 1.6);   // 하이라이트
     mg.generateTexture('mechBird', 50, 50);
     mg.destroy();
 
