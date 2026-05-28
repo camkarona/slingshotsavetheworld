@@ -3230,7 +3230,52 @@ function annihilateAllEnemies(scene, originX, originY) {
     });
 }
 
+// ─── 적 슬로우모션 — 차원균열 동안 새들이 느려짐 ────────
+// factor: 속도 배수 (0.2 = 5배 느림)
+// durationMs: 슬로우 유지 시간 (이후 원래 속도로 복귀)
+function applyEnemySlowMotion(scene, factor, durationMs) {
+    if (!scene || !birds) return;
+    const targets = [];
+    birds.getChildren().forEach(b => {
+        if (!b.active || !b.body) return;
+        // 원본 velocity 저장 + factor 적용
+        b._slowOrigVX = b.body.velocity.x;
+        b._slowOrigVY = b.body.velocity.y;
+        b.body.setVelocity(b._slowOrigVX * factor, b._slowOrigVY * factor);
+        // y-axis 부유 트윈도 같이 느려짐
+        if (b.floatTween) {
+            b._slowOrigTS = b.floatTween.timeScale;
+            b.floatTween.timeScale = factor;
+        }
+        targets.push(b);
+    });
+
+    scene.time.delayedCall(durationMs, () => {
+        targets.forEach(b => {
+            if (!b.active || !b.body) return;
+            if (b._slowOrigVX !== undefined) {
+                // 슬로우 중 벽에 부딪혀 방향이 바뀐 경우 — 현재 방향 부호 유지
+                const curVX = b.body.velocity.x;
+                const restoredVX = curVX === 0 ? b._slowOrigVX
+                                   : Math.sign(curVX) * Math.abs(b._slowOrigVX);
+                b.body.setVelocity(restoredVX, b._slowOrigVY);
+                b._slowOrigVX = b._slowOrigVY = undefined;
+            }
+            if (b.floatTween) {
+                b.floatTween.timeScale = b._slowOrigTS ?? 1;
+                b._slowOrigTS = undefined;
+            }
+        });
+    });
+}
+
 // ─── 차원균열 (LEGENDARY): 화면 전체 색상 반전 + 블랙홀 다이아 ──
+// 총 효과 시간 약 4초. 효과 동안 새들은 슬로우모션 (0.18배)
+const RIFT_TOTAL_MS    = 4000;   // 효과 전체 시간
+const RIFT_FADE_AT     = 3300;   // fade-out 시작 시점
+const RIFT_FADE_DUR    = 700;
+const RIFT_SLOWMO_FAC  = 0.18;   // 새들 속도 배수 (5.5배 느림)
+
 function spawnDimensionalRift(scene, x, y) {
     if (!scene) return;
     const RIFT_HALF = 500;
@@ -3253,116 +3298,102 @@ function spawnDimensionalRift(scene, x, y) {
         g.closePath();
     };
 
+    // ══════ 슬로우모션 ══════
+    applyEnemySlowMotion(scene, RIFT_SLOWMO_FAC, RIFT_TOTAL_MS);
+
     // ══════ 1. 화면 전체 색상 반전 (DIFFERENCE blend + 흰색 fullscreen rect) ══════
     // 흰색을 DIFFERENCE 블렌드로 그리면 아래의 모든 색이 반전됨 (white = 1, 1-color = invert)
     const invertOverlay = scene.add.graphics().setDepth(26).setScrollFactor(0);
     invertOverlay.fillStyle(0xffffff, 1).fillRect(0, 0, camW, camH);
     invertOverlay.setBlendMode(Phaser.BlendModes.DIFFERENCE);
     invertOverlay.setAlpha(0);
-    // Fade-in 빠르게, hold, fade-out
-    scene.tweens.add({ targets: invertOverlay, alpha: 1, duration: 180, ease: 'Quad.Out' });
-    scene.tweens.add({ targets: invertOverlay, alpha: 0, duration: 600, delay: 1200,
-        ease: 'Quad.In',
+    // Fade-in 빠르게, 오래 유지, fade-out
+    scene.tweens.add({ targets: invertOverlay, alpha: 1, duration: 220, ease: 'Quad.Out' });
+    scene.tweens.add({ targets: invertOverlay, alpha: 0, duration: RIFT_FADE_DUR,
+        delay: RIFT_FADE_AT, ease: 'Quad.In',
         onComplete: () => invertOverlay.destroy() });
-    // 색상 반전 깜빡임 (불안정한 차원 느낌) — fade-out 시작 전까지만
-    scene.tweens.add({ targets: invertOverlay, alpha: 0.4,
-        duration: 140, delay: 300,
-        yoyo: true, repeat: 2, ease: 'Sine.InOut' });
+    // 색상 반전 깜빡임 (불안정한 차원) — fade-out 전까지 지속
+    scene.tweens.add({ targets: invertOverlay, alpha: 0.55,
+        duration: 240, delay: 350,
+        yoyo: true, repeat: 5, ease: 'Sine.InOut' });
 
     // ══════ 2. 블랙홀 다이아 (월드 좌표 — 공 주변) ══════
-    // 외곽 보라 글로우 후광 (큰 원형 페이드)
     const glow = scene.add.graphics().setDepth(27).setPosition(x, y);
     glow.fillStyle(0x4400aa, 0.5);
     drawDiamond(glow, 1.15);
     glow.fillPath();
 
-    // 메인 다이아 본체 — 깊은 보라/검정 (블랙홀 사건 지평선)
     const diamond = scene.add.graphics().setDepth(28).setPosition(x, y);
-    // 가장 어두운 외곽층
-    diamond.fillStyle(0x1a0825, 1);
-    drawDiamond(diamond, 1.0);
-    diamond.fillPath();
-    // 중간층 (살짝 보라)
-    diamond.fillStyle(0x0a0014, 1);
-    drawDiamond(diamond, 0.75);
-    diamond.fillPath();
-    // 핵 (완전한 검정 — 사건 지평선)
-    diamond.fillStyle(0x000000, 1);
-    drawDiamond(diamond, 0.45);
-    diamond.fillPath();
-    // 중심 작은 보라 점 (특이점 — 빛이 휘어 나오는 모습)
-    diamond.fillStyle(0x6633ff, 0.85);
-    drawDiamond(diamond, 0.12);
-    diamond.fillPath();
-    diamond.fillStyle(0xffffff, 0.9).fillCircle(0, 0, 4);  // pinpoint singularity
+    diamond.fillStyle(0x1a0825, 1);  drawDiamond(diamond, 1.0);  diamond.fillPath();
+    diamond.fillStyle(0x0a0014, 1);  drawDiamond(diamond, 0.75); diamond.fillPath();
+    diamond.fillStyle(0x000000, 1);  drawDiamond(diamond, 0.45); diamond.fillPath();
+    diamond.fillStyle(0x6633ff, 0.85); drawDiamond(diamond, 0.12); diamond.fillPath();
+    diamond.fillStyle(0xffffff, 0.9).fillCircle(0, 0, 4);
 
-    // 외곽선 — 두 겹 (보라 + 시안 차원 빛)
     const outline = scene.add.graphics().setDepth(29).setPosition(x, y);
-    outline.lineStyle(7, 0x9933ff, 1);
-    drawDiamond(outline, 1.0); outline.strokePath();
-    outline.lineStyle(3, 0x44ddff, 0.95);
-    drawDiamond(outline, 1.0); outline.strokePath();
+    outline.lineStyle(7, 0x9933ff, 1);    drawDiamond(outline, 1.0); outline.strokePath();
+    outline.lineStyle(3, 0x44ddff, 0.95); drawDiamond(outline, 1.0); outline.strokePath();
 
-    // 등장 애니메이션 (Back.Out 으로 살짝 튕김)
+    // 등장 애니메이션 (Back.Out)
     [glow, diamond, outline].forEach(g => { g.setScale(0).setAlpha(0); });
     scene.tweens.add({
         targets: [glow, diamond, outline],
         scaleX: 1, scaleY: 1, alpha: 1,
-        duration: 320, ease: 'Back.Out'
+        duration: 380, ease: 'Back.Out'
     });
-    // 외곽 글로우는 살짝 더 크게 진동
+    // 외곽 글로우 펄스 (지속적 진동 — 길어진 효과 동안 계속)
     scene.tweens.add({
         targets: glow,
-        scaleX: 1.08, scaleY: 1.08, alpha: 0.7,
-        duration: 360, delay: 320,
-        yoyo: true, repeat: 2, ease: 'Sine.InOut'
+        scaleX: 1.10, scaleY: 1.10, alpha: 0.7,
+        duration: 480, delay: 380,
+        yoyo: true, repeat: 5, ease: 'Sine.InOut'
     });
-    // 본체 회전 (블랙홀 회전 느낌)
+    // 본체 천천히 회전 (블랙홀 회전 — 긴 시간 동안 풀 회전)
     scene.tweens.add({
         targets: [diamond, outline],
-        angle: 90,
-        duration: 1400, delay: 200,
-        ease: 'Cubic.InOut'
+        angle: 180,
+        duration: RIFT_TOTAL_MS - 600, delay: 200,
+        ease: 'Linear'
     });
 
-    // 페이드 아웃
+    // 페이드 아웃 (효과 끝)
     scene.tweens.add({
         targets: [glow, diamond, outline],
-        scaleX: 0.6, scaleY: 0.6, alpha: 0,
-        duration: 600, delay: 1300,
+        scaleX: 0.5, scaleY: 0.5, alpha: 0,
+        duration: RIFT_FADE_DUR, delay: RIFT_FADE_AT,
         ease: 'Cubic.In',
         onComplete: () => {
             glow.destroy(); diamond.destroy(); outline.destroy();
         }
     });
 
-    // ══════ 3. 차원 파편 (스파클) — 다이아 안에서 끌려들어가는 듯한 입자 ══════
-    for (let i = 0; i < 40; i++) {
-        // 가장자리 무작위 출발 → 중심으로 빨려들어감 (블랙홀 흡수)
+    // ══════ 3. 차원 파편 — 효과 시간 내내 지속적으로 빨려들어감 ══════
+    // 60개 파편을 시간차를 두고 spawning — 단발 폭발이 아닌 흐름
+    for (let i = 0; i < 60; i++) {
         const ang = Math.random() * Math.PI * 2;
-        const startDist = RIFT_HALF * (0.6 + Math.random() * 0.35);
-        const sx = x + Math.cos(ang) * startDist * 0.8;   // 다이아 형태로 클램프
+        const startDist = RIFT_HALF * (0.55 + Math.random() * 0.40);
+        const sx = x + Math.cos(ang) * startDist * 0.8;
         const sy = y + Math.sin(ang) * startDist * 0.6;
         const col = Math.random() < 0.5 ? 0xaa44ff : 0x44ddff;
         const sparkle = scene.add.graphics().setDepth(30).setPosition(sx, sy);
         sparkle.fillStyle(col, 1).fillRect(-3, -3, 6, 6);
         scene.tweens.add({
             targets: sparkle,
-            x: x, y: y,   // 중심으로 빨려들어감
+            x: x, y: y,
             alpha: 0, scaleX: 0.1, scaleY: 0.1,
-            angle: Phaser.Math.Between(360, 720),
-            duration: 700 + Math.random() * 500,
-            delay: 200 + Math.random() * 600,
+            angle: Phaser.Math.Between(360, 900),
+            duration: 1200 + Math.random() * 1000,    // 더 긴 흡수 시간
+            delay: 200 + Math.random() * 2400,         // 효과 시간 내내 분산
             ease: 'Cubic.In',
             onComplete: () => sparkle.destroy()
         });
     }
 
-    // ══════ 4. 카메라 효과 ══════
-    cam.shake(900, 0.022);
-    cam.flash(180, 100, 30, 200);   // 보라빛 잔상
+    // ══════ 4. 카메라 효과 (긴 셰이크) ══════
+    cam.shake(RIFT_TOTAL_MS - 400, 0.018);
+    cam.flash(220, 100, 30, 200);
 
-    // ══════ 5. 자막 ══════
+    // ══════ 5. 자막 (오래 유지) ══════
     const subtitle = scene.add.text(640, 240, '◇  차 원 균 열  ◇', {
         fontFamily: '"Arial Black", Arial',
         fontSize: '64px',
@@ -3372,22 +3403,22 @@ function spawnDimensionalRift(scene, x, y) {
     }).setOrigin(0.5).setScrollFactor(0).setDepth(31);
     subtitle.setAlpha(0).setScale(0.3);
     scene.tweens.add({ targets: subtitle, alpha: 1, scaleX: 1.15, scaleY: 1.15,
-        duration: 340, ease: 'Back.Out' });
+        duration: 380, ease: 'Back.Out' });
     scene.tweens.add({ targets: subtitle, scaleX: 1.0, scaleY: 1.0,
-        duration: 200, delay: 380 });
-    // 보라↔시안 색상 진동
+        duration: 200, delay: 420 });
+    // 보라↔시안 색상 진동 (효과 시간 내내)
     scene.tweens.add({
         targets: subtitle,
-        duration: 200, delay: 600,
-        yoyo: true, repeat: 4,
+        duration: 350, delay: 700,
+        yoyo: true, repeat: 6,
         ease: 'Linear',
         onUpdate: (tween, target) => {
             const t = tween.progress;
             target.setColor(t < 0.5 ? '#cc66ff' : '#44ddff');
         }
     });
-    scene.tweens.add({ targets: subtitle, alpha: 0, y: 200,
-        duration: 700, delay: 1500, ease: 'Quad.In',
+    scene.tweens.add({ targets: subtitle, alpha: 0, y: 190,
+        duration: 800, delay: RIFT_FADE_AT, ease: 'Quad.In',
         onComplete: () => subtitle.destroy() });
 }
 
@@ -3403,9 +3434,9 @@ function killEnemiesInRift(scene, originX, originY) {
     if (targets.length === 0) return;
 
     targets.forEach((b, i) => {
-        // 거리 기반 점진 사망 (가까운 적부터)
+        // 거리 기반 점진 사망 (가까운 적부터) — 효과 시간 동안 천천히 빨려들어감
         const dist = Math.abs(b.x - originX) + Math.abs(b.y - originY);
-        const delay = 80 + (dist / RIFT_HALF) * 600;
+        const delay = 200 + (dist / RIFT_HALF) * 2200;   // 200ms ~ 2400ms 분산
 
         scene.time.delayedCall(delay, () => {
             if (!b.active) return;
@@ -3445,8 +3476,8 @@ function killEnemiesInRift(scene, originX, originY) {
         });
     });
 
-    // 라운드 클리어 체크 (모든 사망 후)
-    scene.time.delayedCall(1400, () => {
+    // 라운드 클리어 체크 (모든 사망 후 — RIFT_TOTAL_MS 보다 살짝 후)
+    scene.time.delayedCall(RIFT_TOTAL_MS + 200, () => {
         if (remainingBirds <= 0 && !isRoundEnding) {
             isRoundEnding = true;
             scene.time.delayedCall(500, () => showRoundClear(scene), [], scene);
