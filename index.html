@@ -15,6 +15,20 @@
 <audio id="bgm-game"  src="1slingshottosavetheworld.mp3" loop preload="auto" style="display:none"></audio>
 <script src="data.js"></script>
 <script>
+// ─── Phaser Text 전역 고해상도 패치 ──────────────────────
+// Phaser Text 객체는 자체 텍스처(기본 resolution=1) 로 렌더됨 → 캔버스에서 흐릿하게 보임
+// scene.add.text() 호출을 가로채서 style.resolution 을 디바이스 DPR로 자동 적용
+(function patchPhaserTextResolution() {
+    const TEXT_RES = Math.max(2, Math.ceil((window.devicePixelRatio || 1) * 1.5));
+    const factory = Phaser.GameObjects.GameObjectFactory.prototype;
+    const origText = factory.text;
+    factory.text = function(x, y, text, style) {
+        if (!style) style = {};
+        if (style.resolution === undefined) style.resolution = TEXT_RES;
+        return origText.call(this, x, y, text, style);
+    };
+})();
+
 const config = {
     type: Phaser.AUTO,
     width: 1280,
