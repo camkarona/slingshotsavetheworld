@@ -4237,9 +4237,9 @@ function hitBird(stone, bird) {
     if (!stone.active || !bird.active) return;
 
     // ── 발사 직후 근거리 오판정 방지 ──────────────────────
-    // 큰돌 패시브로 히트박스가 커질 경우, 새총 주변 적에 즉시 겹치는 문제 차단
-    // 새총 중심에서 90px 이상 벗어난 뒤부터만 판정
-    if (Phaser.Math.Distance.Between(stone.x, stone.y, SLING_CENTER.x, SLING_CENTER.y) < 90) return;
+    // 새총에서 막 출발할 때 frame 0~1 의 직접 겹침만 차단. (90 → 30 으로 축소)
+    // 90px 은 너무 컸음 — 새총 근처 알짱대는 나방을 잡을 수 없었음
+    if (Phaser.Math.Distance.Between(stone.x, stone.y, SLING_CENTER.x, SLING_CENTER.y) < 30) return;
 
     // ── 중복 타격 방지 (오버랩 다중 발화 + 풀 재사용 대응) ──
     // 관통 여부와 무관하게 같은 돌이 같은 새를 두 번 맞히는 것을 원천 차단
