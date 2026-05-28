@@ -1898,6 +1898,7 @@ function rebuildPassiveLines(scene) {
         nameObj.on('pointerup',   () => {
             passiveActive[name] = !isOn(name);
             if (name === '새총개조') applySlingHeight();   // 토글 즉시 새총 높이 반영
+            if (name === '핵탄두')   applyStoneTint(currentStone);  // 토글 즉시 돌 색 갱신
             rebuildPassiveLines(scene);
         });
         nameObj.on('pointerover', () => { badgeObj.setAlpha(0.65); nameObj.setAlpha(0.65); });
@@ -1964,6 +1965,17 @@ function spawnBirdsSpread(scene, withFade = false) {
 function loadStone(scene) {
     if (currentAmmo <= 0) return;
     currentStone = scene.add.image(SLING_CENTER.x, SLING_CENTER.y, 'stone').setDepth(1).setScale(getStoneScale());
+    applyStoneTint(currentStone);
+}
+
+// 핵탄두 장착 시 돌멩이를 빨갛게 → 핵탄두 시각 신호
+function applyStoneTint(stone) {
+    if (!stone) return;
+    if (nukeStack > 0 && isOn('핵탄두')) {
+        stone.setTint(0xff2222);
+    } else {
+        stone.clearTint();
+    }
 }
 
 // ─── 고무줄 렌더링 ────────────────────────────────────
@@ -2366,125 +2378,224 @@ function spawnNukeEffect(scene, x, y) {
     const cam  = scene.cameras.main;
     const camW = config.width, camH = config.height;
 
-    // ══════ Phase 1: 즉시 백색 섬광 ══════
-    // 화면 전체 페이드 — 일순간 모든 것이 새하얗게
+    // ══════ Phase 1: 백색 섬광 + 2차 노란 섬광 ══════
     const screenFlash = scene.add.graphics().setDepth(30).setScrollFactor(0);
     screenFlash.fillStyle(0xffffff, 1).fillRect(0, 0, camW, camH);
     scene.tweens.add({ targets: screenFlash, alpha: 0,
         duration: 700, ease: 'Quad.In',
         onComplete: () => screenFlash.destroy() });
 
-    // 중심 백열구 — 폭발의 핵
+    // 2차 노란 섬광 — 잔상
+    scene.time.delayedCall(120, () => {
+        const yflash = scene.add.graphics().setDepth(29).setScrollFactor(0);
+        yflash.fillStyle(0xffdd44, 0.8).fillRect(0, 0, camW, camH);
+        scene.tweens.add({ targets: yflash, alpha: 0,
+            duration: 600, ease: 'Quad.In',
+            onComplete: () => yflash.destroy() });
+    });
+
+    // 중심 백열구 — 폭발의 핵 (1.5배 확대)
     const core = scene.add.graphics().setDepth(20).setPosition(x, y);
-    core.fillStyle(0xffffee, 1).fillCircle(0, 0, 50);
+    core.fillStyle(0xffffee, 1).fillCircle(0, 0, 80);
     scene.tweens.add({ targets: core,
-        scaleX: 10, scaleY: 10, alpha: 0,
-        duration: 900, ease: 'Quad.Out',
+        scaleX: 14, scaleY: 14, alpha: 0,
+        duration: 1100, ease: 'Quad.Out',
         onComplete: () => core.destroy() });
 
-    // ══════ Phase 2: 다층 충격파 링 (5겹 — 외곽으로 점점 확장) ══════
+    // 내부 화염구 (오렌지) — 핵 중심 안쪽
+    const fireball = scene.add.graphics().setDepth(19).setPosition(x, y);
+    fireball.fillStyle(0xff8822, 1).fillCircle(0, 0, 60);
+    scene.tweens.add({ targets: fireball,
+        scaleX: 8, scaleY: 8, alpha: 0,
+        duration: 950, delay: 80, ease: 'Quad.Out',
+        onComplete: () => fireball.destroy() });
+
+    // ══════ Phase 2: 다층 충격파 링 (8겹 — 백→황→주→적→암적) ══════
     const RING_DEFS = [
-        { col: 0xffffff, lw: 8, delay:   0, dur:  900, finalScale: 16 },
-        { col: 0xffee44, lw: 6, delay:  80, dur:  950, finalScale: 22 },
-        { col: 0xff9900, lw: 5, delay: 160, dur: 1050, finalScale: 28 },
-        { col: 0xff5500, lw: 4, delay: 240, dur: 1150, finalScale: 34 },
-        { col: 0xcc2200, lw: 3, delay: 340, dur: 1250, finalScale: 40 },
+        { col: 0xffffff, lw:10, delay:   0, dur:  900, finalScale: 18 },
+        { col: 0xffffee, lw: 8, delay:  60, dur:  950, finalScale: 24 },
+        { col: 0xffee44, lw: 7, delay: 130, dur: 1000, finalScale: 30 },
+        { col: 0xffaa22, lw: 6, delay: 200, dur: 1100, finalScale: 36 },
+        { col: 0xff7700, lw: 5, delay: 290, dur: 1200, finalScale: 42 },
+        { col: 0xff4400, lw: 4, delay: 380, dur: 1300, finalScale: 48 },
+        { col: 0xdd2200, lw: 3, delay: 470, dur: 1400, finalScale: 54 },
+        { col: 0xaa1100, lw: 2, delay: 560, dur: 1500, finalScale: 60 },
     ];
     RING_DEFS.forEach(({ col, lw, delay, dur, finalScale }) => {
         const ring = scene.add.graphics().setDepth(15).setPosition(x, y);
-        ring.lineStyle(lw, col, 1).strokeCircle(0, 0, 24);
+        ring.lineStyle(lw, col, 1).strokeCircle(0, 0, 26);
         scene.tweens.add({ targets: ring,
             scaleX: finalScale, scaleY: finalScale, alpha: 0,
             duration: dur, delay, ease: 'Cubic.Out',
             onComplete: () => ring.destroy() });
     });
 
-    // ══════ Phase 3: 16방향 광선 (빛살) ══════
-    for (let i = 0; i < 16; i++) {
-        const ang = (i / 16) * Math.PI * 2;
-        const ray = scene.add.graphics().setDepth(16).setPosition(x, y);
-        ray.fillStyle(0xffee44, 0.85).fillTriangle(0, -8, 0, 8, 220, 0);
-        ray.setRotation(ang);
-        scene.tweens.add({ targets: ray,
-            scaleX: 5, alpha: 0,
-            duration: 700, delay: 60, ease: 'Quad.Out',
-            onComplete: () => ray.destroy() });
+    // ══════ Phase 3: 24방향 광선 (빛살) — 2겹 (백 + 황) ══════
+    for (let i = 0; i < 24; i++) {
+        const ang = (i / 24) * Math.PI * 2 + Math.random() * 0.05;
+        // 백색 코어
+        const rayCore = scene.add.graphics().setDepth(17).setPosition(x, y);
+        rayCore.fillStyle(0xffffee, 0.95).fillTriangle(0, -5, 0, 5, 280, 0);
+        rayCore.setRotation(ang);
+        scene.tweens.add({ targets: rayCore,
+            scaleX: 6, alpha: 0,
+            duration: 800, delay: 40, ease: 'Quad.Out',
+            onComplete: () => rayCore.destroy() });
+        // 노란 외곽
+        const rayGlow = scene.add.graphics().setDepth(16).setPosition(x, y);
+        rayGlow.fillStyle(0xffee44, 0.7).fillTriangle(0, -12, 0, 12, 260, 0);
+        rayGlow.setRotation(ang);
+        scene.tweens.add({ targets: rayGlow,
+            scaleX: 5.5, alpha: 0,
+            duration: 750, delay: 60, ease: 'Quad.Out',
+            onComplete: () => rayGlow.destroy() });
     }
 
-    // ══════ Phase 4: 버섯구름 ══════
+    // ══════ Phase 4: 8방향 번개 (지그재그 광선) — 화면 가장자리까지 ══════
+    for (let i = 0; i < 8; i++) {
+        const ang  = (i / 8) * Math.PI * 2 + Math.random() * 0.3;
+        const len  = 500 + Math.random() * 200;
+        const endX = x + Math.cos(ang) * len;
+        const endY = y + Math.sin(ang) * len;
+        const pts  = [{ x, y }];
+        const SEGS = 10;
+        for (let j = 1; j < SEGS; j++) {
+            const t = j / SEGS;
+            pts.push({
+                x: x + (endX - x) * t + (Math.random() - 0.5) * 80,
+                y: y + (endY - y) * t + (Math.random() - 0.5) * 80,
+            });
+        }
+        pts.push({ x: endX, y: endY });
+
+        scene.time.delayedCall(30 + i * 20, () => {
+            const bolt = scene.add.graphics().setDepth(18);
+            bolt.lineStyle(6, 0xffeebb, 0.9);
+            bolt.beginPath(); bolt.moveTo(pts[0].x, pts[0].y);
+            pts.slice(1).forEach(p => bolt.lineTo(p.x, p.y));
+            bolt.strokePath();
+            bolt.lineStyle(2.5, 0xffffff, 1);
+            bolt.beginPath(); bolt.moveTo(pts[0].x, pts[0].y);
+            pts.slice(1).forEach(p => bolt.lineTo(p.x, p.y));
+            bolt.strokePath();
+            scene.tweens.add({ targets: bolt, alpha: 0,
+                duration: 280, ease: 'Quad.In',
+                onComplete: () => bolt.destroy() });
+        });
+    }
+
+    // ══════ Phase 5: 버섯구름 (강화) ══════
     // 줄기 (지면에서 위로 솟구침)
     const stem = scene.add.graphics().setDepth(14).setPosition(x, GROUND_Y);
-    stem.fillStyle(0xdddddd, 0.85).fillRect(-50, -380, 100, 380);
-    stem.fillStyle(0xaaaaaa, 0.65).fillRect(-35, -370, 70, 370);
+    stem.fillStyle(0xdddddd, 0.85).fillRect(-60, -420, 120, 420);
+    stem.fillStyle(0xaaaaaa, 0.65).fillRect(-42, -410, 84, 410);
+    stem.fillStyle(0x888888, 0.45).fillRect(-26, -400, 52, 400);
     stem.setScale(1, 0.05);
     scene.tweens.add({ targets: stem,
-        scaleY: 1, alpha: 0.7,
+        scaleY: 1, alpha: 0.75,
         duration: 700, ease: 'Quad.Out' });
     scene.tweens.add({ targets: stem,
-        alpha: 0, duration: 1500, delay: 1300, ease: 'Quad.In',
+        alpha: 0, duration: 1700, delay: 1400, ease: 'Quad.In',
         onComplete: () => stem.destroy() });
 
-    // 갓 (mushroom cap) — 위로 부풀어 오르고 좌우로 퍼짐
-    const cap = scene.add.graphics().setDepth(15).setPosition(x, GROUND_Y - 360);
-    cap.fillStyle(0xeeeeee, 0.85).fillCircle(0, 0, 80);
-    cap.fillStyle(0xbbbbbb, 0.6).fillCircle(-30, -10, 55);
-    cap.fillStyle(0xbbbbbb, 0.6).fillCircle(30, -10, 55);
-    cap.fillStyle(0x999999, 0.45).fillCircle(0, 5, 45);
+    // 갓 (mushroom cap) — 더 크고 입체적
+    const cap = scene.add.graphics().setDepth(15).setPosition(x, GROUND_Y - 400);
+    cap.fillStyle(0xeeeeee, 0.85).fillCircle(0, 0, 95);
+    cap.fillStyle(0xcccccc, 0.7).fillCircle(-40, -15, 65);
+    cap.fillStyle(0xcccccc, 0.7).fillCircle(40, -15, 65);
+    cap.fillStyle(0xbbbbbb, 0.65).fillCircle(-22, 12, 52);
+    cap.fillStyle(0xbbbbbb, 0.65).fillCircle(22, 12, 52);
+    cap.fillStyle(0x999999, 0.5).fillCircle(0, 5, 55);
     cap.setScale(0.08);
     cap.setAlpha(0.95);
     scene.tweens.add({ targets: cap,
-        scaleX: 3.5, scaleY: 2.6,
-        y: GROUND_Y - 430,
-        duration: 950, delay: 350, ease: 'Cubic.Out' });
+        scaleX: 4.5, scaleY: 3.2,
+        y: GROUND_Y - 500,
+        duration: 1100, delay: 350, ease: 'Cubic.Out' });
     scene.tweens.add({ targets: cap, alpha: 0,
-        duration: 1400, delay: 1600, ease: 'Quad.In',
+        duration: 1500, delay: 1700, ease: 'Quad.In',
         onComplete: () => cap.destroy() });
 
-    // ══════ Phase 5: 화면 전반에 흩날리는 잔열 입자 ══════
-    for (let i = 0; i < 32; i++) {
+    // ══════ Phase 6: 화면 전반 잔열 입자 (80개로 대폭 증가) ══════
+    for (let i = 0; i < 80; i++) {
         const ang = Math.random() * Math.PI * 2;
-        const speed = 200 + Math.random() * 450;
-        const startD = 20 + Math.random() * 40;
+        const speed = 250 + Math.random() * 600;
+        const startD = 20 + Math.random() * 50;
         const sx = x + Math.cos(ang) * startD;
         const sy = y + Math.sin(ang) * startD;
 
-        const isOrange = Math.random() < 0.55;
+        // 색상 풀: 백·황·주·적
+        const palette = [0xffffff, 0xffee88, 0xff8844, 0xff4422];
+        const col = palette[Math.floor(Math.random() * palette.length)];
+        const radius = 3 + Math.random() * 5;
+
         const ember = scene.add.graphics().setDepth(13).setPosition(sx, sy);
-        ember.fillStyle(isOrange ? 0xff8844 : 0xffeeaa, 1)
-             .fillCircle(0, 0, 3 + Math.random() * 3);
+        ember.fillStyle(col, 1).fillCircle(0, 0, radius);
 
         scene.tweens.add({ targets: ember,
             x: sx + Math.cos(ang) * speed,
             y: sy + Math.sin(ang) * speed,
-            scaleX: 0.2, scaleY: 0.2, alpha: 0,
-            duration: 800 + Math.random() * 700,
+            scaleX: 0.15, scaleY: 0.15, alpha: 0,
+            duration: 900 + Math.random() * 800,
+            delay: Math.random() * 60,
             ease: 'Quad.Out',
             onComplete: () => ember.destroy() });
     }
 
-    // ══════ Phase 6: 카메라 강타 + 노란빛 잔상 ══════
-    cam.shake(1200, 0.035);
-    cam.flash(180, 255, 240, 200);
+    // ══════ Phase 7: 2차 소형 폭발 (위성 폭발 6개) ══════
+    for (let i = 0; i < 6; i++) {
+        const dx = (Math.random() - 0.5) * 600;
+        const dy = (Math.random() - 0.5) * 400 - 50;
+        const delay = 120 + i * 90;
 
-    // ══════ Phase 7: '☢ 핵 탄 두 ☢' 자막 ══════
-    const subtitle = scene.add.text(640, 280, '☢  핵 탄 두  ☢', {
+        scene.time.delayedCall(delay, () => {
+            const mx = x + dx, my = y + dy;
+            // 작은 섬광
+            const mini = scene.add.graphics().setDepth(14).setPosition(mx, my);
+            mini.fillStyle(0xffeecc, 1).fillCircle(0, 0, 30);
+            scene.tweens.add({ targets: mini,
+                scaleX: 3.5, scaleY: 3.5, alpha: 0,
+                duration: 450, ease: 'Quad.Out',
+                onComplete: () => mini.destroy() });
+            // 미니 링
+            const miniRing = scene.add.graphics().setDepth(13).setPosition(mx, my);
+            miniRing.lineStyle(3, 0xff9933, 1).strokeCircle(0, 0, 20);
+            scene.tweens.add({ targets: miniRing,
+                scaleX: 5, scaleY: 5, alpha: 0,
+                duration: 500, ease: 'Cubic.Out',
+                onComplete: () => miniRing.destroy() });
+        });
+    }
+
+    // ══════ Phase 8: 카메라 강타 + 다중 flash ══════
+    cam.shake(1500, 0.05);   // 1200→1500ms, 0.035→0.05 강도 증가
+    cam.flash(220, 255, 240, 200);
+    scene.time.delayedCall(180, () => cam.flash(140, 255, 180, 80));
+    scene.time.delayedCall(380, () => cam.flash(100, 255, 100, 50));
+
+    // ══════ Phase 9: '☢ 핵 폭 발 ☢' 자막 ══════
+    const subtitle = scene.add.text(640, 280, '☢  핵 폭 발  ☢', {
         fontFamily: '"Arial Black", Arial',
-        fontSize: '72px',
+        fontSize: '84px',
         color: '#ffee00',
         stroke: '#aa0000',
-        strokeThickness: 10,
+        strokeThickness: 12,
     }).setOrigin(0.5).setScrollFactor(0).setDepth(31);
 
-    subtitle.setAlpha(0).setScale(0.3);
+    subtitle.setAlpha(0).setScale(0.25);
     scene.tweens.add({ targets: subtitle,
-        alpha: 1, scaleX: 1.15, scaleY: 1.15,
-        duration: 320, delay: 60, ease: 'Back.Out' });
+        alpha: 1, scaleX: 1.20, scaleY: 1.20,
+        duration: 360, delay: 60, ease: 'Back.Out' });
     scene.tweens.add({ targets: subtitle,
         scaleX: 1.0, scaleY: 1.0,
-        duration: 180, delay: 380 });
+        duration: 200, delay: 420 });
+    // 미세 진동 — 강렬한 느낌
     scene.tweens.add({ targets: subtitle,
-        alpha: 0, y: 240,
-        duration: 700, delay: 1400, ease: 'Quad.In',
+        angle: { from: -1.5, to: 1.5 },
+        duration: 60, delay: 600, yoyo: true, repeat: 6 });
+    scene.tweens.add({ targets: subtitle,
+        alpha: 0, y: 230,
+        duration: 800, delay: 1500, ease: 'Quad.In',
         onComplete: () => subtitle.destroy() });
 }
 
@@ -2868,6 +2979,7 @@ function fireOneStone(angle, dist, isPrimary) {
     s.noGravity        = noGravity;
     s.lifetime         = 0;
     s.setAlpha(isPrimary ? 1 : 0.92);
+    applyStoneTint(s);
 
     // 산탄: ±20° 추가 2방향 동시 발사 (각 발사마다 적용)
     if (shotgunStack > 0 && isOn('산탄')) {
@@ -2896,6 +3008,7 @@ function fireOneStone(angle, dist, isPrimary) {
             sa.noGravity        = noGravity;
             sa.lifetime         = 0;
             sa.setAlpha(0.85);
+            applyStoneTint(sa);
         });
     }
 
@@ -3743,6 +3856,7 @@ function applyPassive(scene, passive) {
     } else if (passive.name === '핵탄두') {
         if (nukeStack >= _ms('핵탄두')) return;
         nukeStack++;
+        applyStoneTint(currentStone);   // 장전된 돌 즉시 빨강으로
     } else if (passive.name === '새총개조') {
         if (slingModStack >= _ms('새총개조')) return;
         slingModStack++;
