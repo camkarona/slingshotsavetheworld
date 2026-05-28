@@ -1615,6 +1615,21 @@ function update(time, delta) {
         const minX = key === 'mothBird' ? 330 : isFloater ? 2000 : isTendril ? 300 : 800;
         if (b.x > maxX && b.body.velocity.x > 0) b.setVelocityX(-Math.abs(b.body.velocity.x));
         if (b.x < minX && b.body.velocity.x < 0) b.setVelocityX( Math.abs(b.body.velocity.x));
+
+        // ── 나방 — 상하좌우 불규칙 이동 (실제 나방처럼 펄럭임) ──
+        // 350~1050ms 주기로 무작위 방향·속도 갱신.
+        // 슬로우모션(_slowOrigVX) 또는 시간정지(_frozenVX) 중이면 갱신 패스
+        if (b.isMoth && b._slowOrigVX === undefined && b._frozenVX === undefined) {
+            if (time >= b.mothNextDirAt) {
+                const ang = Math.random() * Math.PI * 2;
+                const sp  = b.mothBaseSpeed * (0.4 + Math.random() * 1.1);   // 호버 ~ 다트
+                b.body.setVelocity(Math.cos(ang) * sp, Math.sin(ang) * sp * 0.55);
+                b.mothNextDirAt = time + 350 + Math.random() * 700;
+            }
+            // y 경계 반사 (mothYMin ~ mothYMax 영역 유지)
+            if (b.y < b.mothYMin && b.body.velocity.y < 0) b.body.setVelocityY( Math.abs(b.body.velocity.y));
+            if (b.y > b.mothYMax && b.body.velocity.y > 0) b.body.setVelocityY(-Math.abs(b.body.velocity.y));
+        }
     });
 
     // 돌멩이 — 농구공 바운스 + 월드 이탈 처리
@@ -1920,21 +1935,30 @@ function spawnBird(scene, withFade = false, fixedX = null, forcedType = null) {
     if (withFade) bird.setAlpha(0);
 
     const spd = Phaser.Math.Between(type.speedMin, type.speedMax);
-    bird.setVelocityX(Phaser.Math.Between(0, 1) ? spd : -spd);
-    const floatAmt = type.key === 'mothBird' ? Phaser.Math.Between(-8, 8)
-                   : type.key === 'eagle'   ? Phaser.Math.Between(-30, 30)
-                   : type.key === 'floater' ? Phaser.Math.Between(-55, 55)
-                   : type.key === 'tendril'  ? Phaser.Math.Between(-18, 18)
-                   : type.key === 'overlord' ? Phaser.Math.Between(-4, 4)
-                   : Phaser.Math.Between(-20, 20);
-    const floatDur = type.key === 'mothBird' ? Phaser.Math.Between(300, 600)
-                   : type.key === 'eagle'    ? Phaser.Math.Between(800, 1600)
-                   : type.key === 'floater'  ? Phaser.Math.Between(1800, 3200)
-                   : type.key === 'tendril'  ? Phaser.Math.Between(1600, 2800)
-                   : type.key === 'overlord' ? Phaser.Math.Between(3000, 5000)
-                   : Phaser.Math.Between(1000, 2000);
-    // 시간정지 패시브가 일시정지하기 위해 트윈 참조 저장
-    bird.floatTween = scene.tweens.add({ targets: bird, y: y + floatAmt, duration: floatDur, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+
+    // 나방은 별도 처리 — 상하좌우 불규칙 이동 (update 루프에서 주기적으로 방향 전환)
+    if (type.key === 'mothBird') {
+        bird.isMoth          = true;
+        bird.mothBaseSpeed   = spd;
+        bird.mothNextDirAt   = 0;    // update 루프에서 즉시 첫 방향 설정
+        bird.mothYMin        = (type.zoneY && type.zoneY[0]) ?? 495;
+        bird.mothYMax        = (type.zoneY && type.zoneY[1]) ?? 635;
+        // floatTween 없이 velocity 기반으로 자연스러운 나방 움직임
+    } else {
+        bird.setVelocityX(Phaser.Math.Between(0, 1) ? spd : -spd);
+        const floatAmt = type.key === 'eagle'   ? Phaser.Math.Between(-30, 30)
+                       : type.key === 'floater' ? Phaser.Math.Between(-55, 55)
+                       : type.key === 'tendril'  ? Phaser.Math.Between(-18, 18)
+                       : type.key === 'overlord' ? Phaser.Math.Between(-4, 4)
+                       : Phaser.Math.Between(-20, 20);
+        const floatDur = type.key === 'eagle'    ? Phaser.Math.Between(800, 1600)
+                       : type.key === 'floater'  ? Phaser.Math.Between(1800, 3200)
+                       : type.key === 'tendril'  ? Phaser.Math.Between(1600, 2800)
+                       : type.key === 'overlord' ? Phaser.Math.Between(3000, 5000)
+                       : Phaser.Math.Between(1000, 2000);
+        // 시간정지 패시브가 일시정지하기 위해 트윈 참조 저장
+        bird.floatTween = scene.tweens.add({ targets: bird, y: y + floatAmt, duration: floatDur, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+    }
     if (withFade) scene.tweens.add({ targets: bird, alpha: 1, duration: 400 });
 
 }
