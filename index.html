@@ -17,12 +17,9 @@
 <script>
 // ─── Phaser Text 전역 고해상도 패치 ──────────────────────
 // Phaser Text 객체는 자체 텍스처(기본 resolution=1) 로 렌더됨 → 캔버스에서 흐릿하게 보임
-// scene.add.text() 호출을 가로채서 style.resolution 을 자동 적용
-// 작은 폰트(14~22px)도 충분한 디테일을 갖도록 공격적으로 설정
+// scene.add.text() 호출을 가로채서 style.resolution 을 디바이스 DPR로 자동 적용
 (function patchPhaserTextResolution() {
-    const dpr = window.devicePixelRatio || 1;
-    const TEXT_RES = Math.max(3, Math.ceil(dpr * 2));   // DPR=1 → 3, DPR=2 → 4, DPR=3+ → 6+
-    // scene.add.text 패치
+    const TEXT_RES = Math.max(2, Math.ceil((window.devicePixelRatio || 1) * 1.5));
     const factory = Phaser.GameObjects.GameObjectFactory.prototype;
     const origText = factory.text;
     factory.text = function(x, y, text, style) {
@@ -30,17 +27,6 @@
         if (style.resolution === undefined) style.resolution = TEXT_RES;
         return origText.call(this, x, y, text, style);
     };
-    // make.text 패치 (혹시 사용될 경우 대비)
-    const creator = Phaser.GameObjects.GameObjectCreator.prototype;
-    if (creator && creator.text) {
-        const origMake = creator.text;
-        creator.text = function(config, addToScene) {
-            if (!config) config = {};
-            if (!config.style) config.style = {};
-            if (config.style.resolution === undefined) config.style.resolution = TEXT_RES;
-            return origMake.call(this, config, addToScene);
-        };
-    }
 })();
 
 const config = {
@@ -1654,7 +1640,7 @@ function create() {
     // ─── 남은 오염 생물 카운터 (미니맵 바로 아래) ─────────
     uiRemainingText = this.add.text(PANEL_CX, REMAINING_Y, '', {
         fontFamily: '"Arial Black", Arial',
-        fontSize: '14px',
+        fontSize: '18px',
         color: '#ffdd55',
         stroke: '#000000',
         strokeThickness: 2,
@@ -1676,7 +1662,7 @@ function create() {
     // ─── 미니맵 토글 버튼 (패널 바로 아래, 영구 UI) ─────────
     uiMinimapBtnBg  = this.add.graphics().setScrollFactor(0).setDepth(9);
     uiMinimapBtnTxt = this.add.text(PANEL_CX, TOGGLE_Y, '● 미니맵  ON', {
-        fontFamily: 'Arial Black', fontSize: '14px', color: '#e8a030'
+        fontFamily: 'Arial Black', fontSize: '18px', color: '#e8a030'
     }).setOrigin(0.5).setScrollFactor(0).setDepth(9);
     drawMinimapBtn(1.0);
     permanentHitAreas.push({
@@ -2775,7 +2761,7 @@ function compensateHUDZoom() {
     p = f(640, 48);   uiAmmoText.setPosition(p.x, p.y);
     // uiPassiveText 는 숨김 상태 — 줌 보정 불필요
     p = f(PANEL_CX, REMAINING_Y);  if (uiRemainingText) uiRemainingText.setPosition(p.x, p.y);
-    p = f(1200, 20);  if (uiResearchBtnTxt) uiResearchBtnTxt.setPosition(p.x, p.y).setFontSize(`${Math.round(15 / z)}px`);
+    p = f(1200, 20);  if (uiResearchBtnTxt) uiResearchBtnTxt.setPosition(p.x, p.y).setFontSize(`${15 / z}px`);
     // 박사님 연구 버튼 배경도 zoom 보정 (텍스트만 보정되면 배경이 어긋남)
     if (uiResearchBtn && uiResearchBtn._render) uiResearchBtn._render();
     p = f(1260, 58);  uiMaterialText.setPosition(p.x, p.y);
@@ -2783,15 +2769,15 @@ function compensateHUDZoom() {
     // Player Status 패널 + 미니맵 토글 버튼
     drawPanelBg(z);
     p = f(PANEL_CX, 22); if (uiPanelTitle)   uiPanelTitle.setPosition(p.x, p.y);
-    p = f(18,  52); if (uiPanelContent) uiPanelContent.setPosition(p.x, p.y).setFontSize(`${Math.round(14 / z)}px`);
+    p = f(18,  52); if (uiPanelContent) uiPanelContent.setPosition(p.x, p.y).setFontSize(`${14 / z}px`);
     drawMinimapBtn(z);
-    p = f(PANEL_CX, TOGGLE_Y); if (uiMinimapBtnTxt) uiMinimapBtnTxt.setPosition(p.x, p.y).setFontSize(`${Math.round(14 / z)}px`);
+    p = f(PANEL_CX, TOGGLE_Y); if (uiMinimapBtnTxt) uiMinimapBtnTxt.setPosition(p.x, p.y).setFontSize(`${18 / z}px`);
     // 조준화면으로 버튼은 화면 정중앙 → 위치는 불변, 크기만 역보정
     if (uiAimBtn) { uiAimBtn.setScale(1 / z); uiAimBtnTxt.setScale(1 / z); }
     // 패시브 라인 줌 보정 (각 오브젝트에 저장된 _hx, _hy, _fs 사용)
     uiPassiveLines.forEach(obj => {
         const p2 = f(obj._hx ?? 18, obj._hy ?? 103);
-        obj.setPosition(p2.x, p2.y).setFontSize(`${Math.round((obj._fs ?? 13) / z)}px`);
+        obj.setPosition(p2.x, p2.y).setFontSize(`${(obj._fs ?? 13) / z}px`);
     });
 }
 
