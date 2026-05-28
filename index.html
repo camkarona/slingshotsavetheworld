@@ -1384,9 +1384,10 @@ function create() {
     minimapGraphics    = this.add.graphics().setScrollFactor(0).setDepth(20);
 
     // HUD — setScrollFactor(0) 으로 카메라 이동/줌에 고정
-    uiRoundText = this.add.text(640, 18, 'ROUND 1', {
+    // ROUND 표시는 단일 라운드 게임 루프이므로 의미 없음 → 숨김
+    uiRoundText = this.add.text(640, 18, '', {
         fontFamily: 'Arial Black', fontSize: '22px', color: '#a09060'
-    }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(10);
+    }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(10).setVisible(false);
 
     // uiScoreText 제거 — '처치한 방사능 새' 텍스트 삭제 (직관적 정보로 대체됨)
 
@@ -3862,7 +3863,7 @@ function triggerTimeStop(scene) {
         duration: TIME_STOP_DURATION, ease: 'Quad.In',
         onComplete: () => tint.destroy() });
 
-    const label = scene.add.text(640, 110, '⏱  TIME  STOP', {
+    const label = scene.add.text(640, 110, '⏱  시 간 정 지', {
         fontFamily: '"Arial Black", Arial',
         fontSize: '34px',
         color: '#ccddff',
@@ -4244,41 +4245,13 @@ function checkRoundEnd() {
     });
 }
 
-// ─── 라운드 클리어 오버레이 (직접 표시, wipe 없음) ───
+// ─── (Deprecated) 라운드 클리어 오버레이 — 단일 라운드 루프이므로 사용 안 함 ──
+// applyPassive 의 미드플로우 안전망에서만 호출 → 그냥 엔딩화면으로 리다이렉트
 function showRoundClearOverlay(scene) {
-    clearOverlay();
-    uiOverlay = scene.add.container(0, 0).setDepth(50).setScrollFactor(0);
-
-    mkRect(scene, uiOverlay, 0, 0, 1280, 720, 0x000000, 0.82);
-    mkPanel(scene, uiOverlay, 290, 145, 700, 430);
-
-    mkText(scene, uiOverlay, 640, 200, `ROUND  ${roundNumber}  CLEAR!`, {
-        fontFamily: 'Arial Black', fontSize: '48px', color: '#39ff14'
-    });
-    mkText(scene, uiOverlay, 640, 280, `보유 특수물질 : ${materialStock}g`, {
-        fontFamily: 'Arial Black', fontSize: '26px', color: '#e8a030'
-    });
-    mkText(scene, uiOverlay, 640, 322, '박사님 연구에 투자할 수 있습니다!', {
-        fontFamily: 'Arial', fontSize: '16px', color: '#aaaaaa'
-    });
-
-    const div = scene.add.graphics();
-    div.lineStyle(1, 0x4a3010, 1).lineBetween(320, 350, 960, 350);
-    uiOverlay.add(div);
-
-    // 연구 버튼 (오버레이 내부) — 기증 팝업 표시
-    mkBtn(scene, uiOverlay, 640, 420, 300, 52, '🔬 박사님 강화 연구  (10g~)', 0xffdd44, '#000000', () => {
-        if (materialStock >= 10) {
-            showDonationUI(scene, 0, materialStock);
-        }
-    });
-
-    mkBtn(scene, uiOverlay, 640, 500, 280, 52, '다음 라운드 ▶', 0x39ff14, '#000000',
-        () => startNextRound(scene)
-    );
+    showGameOver(scene, true);
 }
 
-// ─── 라운드 클리어 (50마리 전멸) — wipe 트랜지션 후 오버레이 ─
+// ─── 라운드 클리어 (모든 적 전멸) — 곧바로 엔딩 화면으로 ──
 function showRoundClear(scene) {
     // 적립된 라운드 획득 재료 materialStock에 합산
     materialStock += roundMaterial;
@@ -4286,7 +4259,7 @@ function showRoundClear(scene) {
     refreshMaterialHUD();
     updateResearchBtn();
 
-    wipeReturn(scene, () => showRoundClearOverlay(scene));
+    wipeReturn(scene, () => showGameOver(scene, true));
 }
 
 // ─── 순위 저장 (localStorage) ────────────────────────
@@ -4330,7 +4303,7 @@ function openNameInput(scene) {
     div.innerHTML = `
         <div style="font-size:20px;margin-bottom:8px;color:#e8a030">이름을 남기시오</div>
         <div style="font-size:14px;color:#888;margin-bottom:18px">
-            처치 ${totalBirdsHit}마리 &nbsp;|&nbsp; ROUND ${roundNumber}
+            처치 ${totalBirdsHit}마리 &nbsp;|&nbsp; 특수물질 ${materialStock}g
         </div>
         <input id="sling-name-input" type="text" maxlength="10"
             placeholder="닉네임 (최대 10자)"
@@ -4366,8 +4339,13 @@ function openNameInput(scene) {
     });
 }
 
-// ─── GAME OVER ────────────────────────────────────────
-function showGameOver(scene) {
+// ─── GAME END (게임 종료 화면) ────────────────────────
+// victory: 모든 적 처치 (true) 또는 돌멩이 소진 (false)
+let _lastEndVictory = false;
+function showGameOver(scene, victory) {
+    if (victory === undefined) victory = _lastEndVictory;
+    else _lastEndVictory = victory;
+
     // HTML 입력창이 열려있으면 닫기
     const old = document.getElementById('sling-name-overlay');
     if (old) old.remove();
@@ -4378,16 +4356,20 @@ function showGameOver(scene) {
     mkRect(scene, uiOverlay, 0, 0, 1280, 720, 0x000000, 0.90);
 
     // ── 상단: 타이틀 + 이번 기록 ──────────────────────
-    mkText(scene, uiOverlay, 640, 48, 'GAME OVER', {
-        fontFamily: 'Arial Black', fontSize: '64px', color: '#ff4444',
-        stroke: '#880000', strokeThickness: 4
+    mkText(scene, uiOverlay, 640, 48, victory ? 'MISSION CLEAR!' : 'GAME OVER', {
+        fontFamily: 'Arial Black', fontSize: '64px',
+        color: victory ? '#39ff14' : '#ff4444',
+        stroke: victory ? '#005500' : '#880000',
+        strokeThickness: 4
     });
     mkText(scene, uiOverlay, 640, 132,
-        `처치한 적 : ${totalBirdsHit}마리   |   ROUND ${roundNumber}   |   보유 특수물질 ${materialStock}g`, {
+        `처치한 적 : ${totalBirdsHit}마리   |   보유 특수물질 ${materialStock}g`, {
         fontFamily: 'Arial Black', fontSize: '20px', color: '#ffffff'
     });
-    mkText(scene, uiOverlay, 640, 162, '돌멩이가 소진되었습니다. 남은 오염 생물을 처치하지 못했습니다.', {
-        fontFamily: 'Arial', fontSize: '15px', color: '#888888'
+    mkText(scene, uiOverlay, 640, 162,
+        victory ? '🎉 모든 오염 생물을 처치했습니다!'
+                : '돌멩이가 소진되었습니다. 남은 오염 생물을 처치하지 못했습니다.', {
+        fontFamily: 'Arial', fontSize: '15px', color: victory ? '#aaffaa' : '#888888'
     });
 
     // ── 구분선 ───────────────────────────────────────
@@ -4401,8 +4383,8 @@ function showGameOver(scene) {
     });
 
     const scores  = getScores();
-    const headers = ['순위', '이름', '처치', '라운드', '날짜'];
-    const colX    = [300, 460, 680, 840, 1000];
+    const headers = ['순위', '이름', '처치', '특수물질', '날짜'];
+    const colX    = [300, 470, 680, 840, 1000];
     const hY      = 234;
 
     // 헤더
@@ -4423,7 +4405,7 @@ function showGameOver(scene) {
     } else {
         scores.slice(0, 7).forEach((s, idx) => {
             const ry    = hY + 36 + idx * 38;
-            const isCur = (s.kills === totalBirdsHit && s.round === roundNumber && s.name === '🆕');
+            const isCur = (s.kills === totalBirdsHit && s.material === materialStock && s.name === '🆕');
             const medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `${idx + 1}위`;
             const rowCol = idx % 2 === 0 ? 0x111111 : 0x0a0a0a;
             const rowG = scene.add.graphics();
@@ -4431,11 +4413,11 @@ function showGameOver(scene) {
             uiOverlay.add(rowG);
 
             const tc = isCur ? '#ffff44' : idx < 3 ? '#ffffff' : '#aaaaaa';
-            mkText(scene, uiOverlay, colX[0], ry, medal,           { fontFamily: 'Arial', fontSize: '16px', color: tc });
-            mkText(scene, uiOverlay, colX[1], ry, s.name,          { fontFamily: 'Arial Black', fontSize: '16px', color: tc });
-            mkText(scene, uiOverlay, colX[2], ry, `${s.kills}마리`, { fontFamily: 'Arial', fontSize: '16px', color: tc });
-            mkText(scene, uiOverlay, colX[3], ry, `R${s.round}`,   { fontFamily: 'Arial', fontSize: '16px', color: tc });
-            mkText(scene, uiOverlay, colX[4], ry, s.date,          { fontFamily: 'Arial', fontSize: '13px', color: '#666666' });
+            mkText(scene, uiOverlay, colX[0], ry, medal,                { fontFamily: 'Arial', fontSize: '16px', color: tc });
+            mkText(scene, uiOverlay, colX[1], ry, s.name,               { fontFamily: 'Arial Black', fontSize: '16px', color: tc });
+            mkText(scene, uiOverlay, colX[2], ry, `${s.kills}마리`,      { fontFamily: 'Arial', fontSize: '16px', color: tc });
+            mkText(scene, uiOverlay, colX[3], ry, `${s.material ?? 0}g`, { fontFamily: 'Arial', fontSize: '16px', color: tc });
+            mkText(scene, uiOverlay, colX[4], ry, s.date,               { fontFamily: 'Arial', fontSize: '13px', color: '#666666' });
         });
     }
 
