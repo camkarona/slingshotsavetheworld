@@ -1313,28 +1313,44 @@ function create() {
         stroke: '#000000', strokeThickness: 3,
         shadow: { offsetX: 0, offsetY: 0, color: '#ffaa00', blur: 8, fill: true }
     }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(11).setInteractive({ useHandCursor: true });
-    // 버튼 배경 그리기 함수 (활성/비활성 공용)
+    // 버튼 배경 그리기 함수 (활성/호버 + zoom 보정 공용)
+    uiResearchBtn._active = false;
+    uiResearchBtn._hover  = false;
     uiResearchBtn._draw = (active) => {
+        uiResearchBtn._active = !!active;
+        uiResearchBtn._hover  = false;
+        uiResearchBtn._render();
+    };
+    uiResearchBtn._render = () => {
         uiResearchBtn.clear();
+        const z = sceneRef ? sceneRef.cameras.main.zoom : 1.0;
+        const ccx = config.width / 2, ccy = config.height / 2;
+        const f = (sx, sy) => ({ x: ccx + (sx - ccx) / z, y: ccy + (sy - ccy) / z });
         const bx = 1260, by = 18, bw = 148, bh = 28;
-        if (active) {
-            uiResearchBtn.fillStyle(0x2a1800, 1).fillRoundedRect(bx - bw, by, bw, bh, 6);
-            uiResearchBtn.lineStyle(2, 0xffcc44, 1).strokeRoundedRect(bx - bw, by, bw, bh, 6);
-            // 내부 은은한 글로우
-            uiResearchBtn.lineStyle(4, 0xffaa00, 0.25).strokeRoundedRect(bx - bw - 2, by - 2, bw + 4, bh + 4, 8);
+        const tl = f(bx - bw, by);
+        const w = bw / z, h = bh / z, r = 6 / z;
+        const active = uiResearchBtn._active;
+        const hover  = uiResearchBtn._hover;
+        if (hover && active) {
+            uiResearchBtn.fillStyle(0x3d2200, 1).fillRoundedRect(tl.x, tl.y, w, h, r);
+            uiResearchBtn.lineStyle(2 / z, 0xffee88, 1).strokeRoundedRect(tl.x, tl.y, w, h, r);
+            uiResearchBtn.lineStyle(6 / z, 0xffcc44, 0.35)
+                .strokeRoundedRect(tl.x - 3/z, tl.y - 3/z, w + 6/z, h + 6/z, 10/z);
+        } else if (active) {
+            uiResearchBtn.fillStyle(0x2a1800, 1).fillRoundedRect(tl.x, tl.y, w, h, r);
+            uiResearchBtn.lineStyle(2 / z, 0xffcc44, 1).strokeRoundedRect(tl.x, tl.y, w, h, r);
+            uiResearchBtn.lineStyle(4 / z, 0xffaa00, 0.25)
+                .strokeRoundedRect(tl.x - 2/z, tl.y - 2/z, w + 4/z, h + 4/z, 8/z);
         } else {
-            uiResearchBtn.fillStyle(0x1a1208, 1).fillRoundedRect(bx - bw, by, bw, bh, 6);
-            uiResearchBtn.lineStyle(1, 0x443311, 1).strokeRoundedRect(bx - bw, by, bw, bh, 6);
+            uiResearchBtn.fillStyle(0x1a1208, 1).fillRoundedRect(tl.x, tl.y, w, h, r);
+            uiResearchBtn.lineStyle(1 / z, 0x443311, 1).strokeRoundedRect(tl.x, tl.y, w, h, r);
         }
     };
     uiResearchBtn._draw(false);
     uiResearchBtnTxt.on('pointerover', () => {
         if (materialStock + roundMaterial >= 10) {
-            uiResearchBtn.clear();
-            const bx = 1260, by = 18, bw = 148, bh = 28;
-            uiResearchBtn.fillStyle(0x3d2200, 1).fillRoundedRect(bx - bw, by, bw, bh, 6);
-            uiResearchBtn.lineStyle(2, 0xffee88, 1).strokeRoundedRect(bx - bw, by, bw, bh, 6);
-            uiResearchBtn.lineStyle(6, 0xffcc44, 0.35).strokeRoundedRect(bx - bw - 3, by - 3, bw + 6, bh + 6, 10);
+            uiResearchBtn._hover = true;
+            uiResearchBtn._render();
         }
     });
     uiResearchBtnTxt.on('pointerout', () => updateResearchBtn());
@@ -2232,6 +2248,8 @@ function compensateHUDZoom() {
     // uiPassiveText 는 숨김 상태 — 줌 보정 불필요
     p = f(PANEL_CX, REMAINING_Y);  if (uiRemainingText) uiRemainingText.setPosition(p.x, p.y);
     p = f(1200, 20);  if (uiResearchBtnTxt) uiResearchBtnTxt.setPosition(p.x, p.y).setFontSize(`${15 / z}px`);
+    // 박사님 연구 버튼 배경도 zoom 보정 (텍스트만 보정되면 배경이 어긋남)
+    if (uiResearchBtn && uiResearchBtn._render) uiResearchBtn._render();
     p = f(1260, 58);  uiMaterialText.setPosition(p.x, p.y);
     p = f(1260, 84);  if (uiPollutionText) uiPollutionText.setPosition(p.x, p.y);
     // Player Status 패널 + 미니맵 토글 버튼
@@ -4499,6 +4517,40 @@ function showKillFx(scene, worldX, worldY, material, textureKey) {
         ease: 'Power2.easeOut',
         onComplete: () => nameTxt.destroy()
     });
+
+    // ── 고철수집 보너스 플로팅 텍스트 ──
+    const scrapBonus = getScrapBonus();
+    if (scrapBonus > 0) {
+        const bonusTxt = scene.add.text(worldX + 50, worldY - 32,
+            `♻ +${scrapBonus}g 고철!`, {
+                fontFamily: '"Arial Black", Arial',
+                fontSize: '22px',
+                color: '#ffcc44',
+                stroke: '#3a1f00',
+                strokeThickness: 5,
+            }
+        ).setOrigin(0.5).setDepth(18).setAlpha(0).setScale(0.6);
+        // 등장 (Back.Out으로 살짝 튕김)
+        scene.tweens.add({
+            targets: bonusTxt,
+            alpha: 1, scale: 1.1,
+            duration: 220,
+            delay: 120,
+            ease: 'Back.Out',
+        });
+        // 위로 떠오르며 페이드
+        scene.tweens.add({
+            targets: bonusTxt,
+            y: bonusTxt.y - 90,
+            x: bonusTxt.x + 12,
+            alpha: 0,
+            scale: 0.85,
+            duration: 800,
+            delay: 380,
+            ease: 'Power2.easeOut',
+            onComplete: () => bonusTxt.destroy()
+        });
+    }
 }
 
 function showKillNotification(scene, textureKey, material) {
