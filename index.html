@@ -67,9 +67,10 @@ const PASSIVE_MAX_STACK_OF = {
     '관통':     1,   // 무한관통
     '산탄':     1,   // 3방향 동시 발사
     '폭발':     1,   // 범위 폭발
-    '자석탄':   1,   // 정점에서 1회 유도 (스택 없음)
+    '자석탄':    1,  // 정점에서 1회 유도 (스택 없음)
     '돌을 줍다': 3,  // 즉시 +2 돌멩이 (1회성 × 최대 3번)
-    '번개탄':   1,  // 2초마다 주변 번개 공격
+    '번개탄':    1,  // 2초마다 주변 번개 공격
+    '체세포분열': 1, // 명중 시 2개로 분열, MAX_SPLIT_GEN까지 재귀
 };
 
 // ─── 미니맵 상수 ──────────────────────────────────────
@@ -194,8 +195,9 @@ let basketballStack = 0;   // 농구공 (RARE)
 let shotgunStack    = 0;   // 산탄 (EPIC): 3방향 동시 발사
 let magnetStack     = 0;   // 자석탄 (RARE): 가까운 적 유도
 let explosionStack  = 0;   // 폭발 (EPIC): 범위 폭발
-let pickupStoneStack = 0;  // 돌을 줍다 (NORMAL): 즉시 +2 돌멩이 (1회성)
-let lightningStack   = 0;  // 번개탄 (EPIC): 2초마다 주변 번개 공격
+let pickupStoneStack  = 0;  // 돌을 줍다 (NORMAL): 즉시 +2 돌멩이 (1회성)
+let lightningStack    = 0;  // 번개탄 (EPIC): 2초마다 주변 번개 공격
+let cellDivisionStack = 0;  // 체세포분열 (EPIC): 명중 시 돌이 2개로 분열
 
 // ─── 패시브 토글 시스템 ──────────────────────────────
 // 각 발사마다 패시브 취사선택 가능. false = 이번 발사에서 비활성화
@@ -606,7 +608,8 @@ class IntroScene extends Phaser.Scene {
             { name: '관통',   max: 1, rarity: 'EPIC',   desc: '무한 관통 (1스택)',             get: () => piercingStack,   set: v => { piercingStack   = v; } },
             { name: '산탄',   max: 1, rarity: 'EPIC',   desc: '3방향 동시 발사 (±20°)',        get: () => shotgunStack,    set: v => { shotgunStack    = v; } },
             { name: '폭발',   max: 1, rarity: 'EPIC',   desc: '명중 시 반경 130px 폭발',       get: () => explosionStack,  set: v => { explosionStack  = v; } },
-            { name: '번개탄', max: 1, rarity: 'EPIC',   desc: '0.5초마다 반경 160px 번개 공격',   get: () => lightningStack,  set: v => { lightningStack  = v; } },
+            { name: '번개탄',    max: 1, rarity: 'EPIC',   desc: '0.5초마다 반경 160px 번개 공격',       get: () => lightningStack,    set: v => { lightningStack    = v; } },
+            { name: '체세포분열', max: 1, rarity: 'EPIC',   desc: '명중 시 2개로 분열 / 재귀 분열 최대 3세대', get: () => cellDivisionStack, set: v => { cellDivisionStack = v; } },
         ];
 
         const rarityColor = { NORMAL: '#aaaaaa', RARE: '#44bbff', EPIC: '#aa44ff' };
@@ -692,10 +695,10 @@ class IntroScene extends Phaser.Scene {
             this.modalOpen = false;
             // DEV MODE 에서 설정한 패시브들 → 토글 ON으로 초기화
             Object.keys(passiveActive).forEach(k => delete passiveActive[k]);
-            const devNames  = ['탄성증가','파워업','돌을 줍다','큰돌','조준선','농구공','관통','자석탄','산탄','폭발','번개탄'];
+            const devNames  = ['탄성증가','파워업','돌을 줍다','큰돌','조준선','농구공','관통','자석탄','산탄','폭발','번개탄','체세포분열'];
             const devStacks = [armMuscleStack, ironBallStack, pickupStoneStack,
                                bigStoneStack, aimLineStack, basketballStack, piercingStack,
-                               magnetStack, shotgunStack, explosionStack, lightningStack];
+                               magnetStack, shotgunStack, explosionStack, lightningStack, cellDivisionStack];
             devNames.forEach((n, i) => { if (devStacks[i] > 0) passiveActive[n] = true; });
             this.startGame();
         });
@@ -711,7 +714,7 @@ class IntroScene extends Phaser.Scene {
             // 패시브 초기화 (취소 시 원상복구)
             armMuscleStack = 0; bigStoneStack = 0; ironBallStack = 0;
             aimLineStack   = 0; piercingStack = 0; basketballStack = 0;
-            shotgunStack  = 0; magnetStack = 0; explosionStack = 0; pickupStoneStack = 0; lightningStack = 0;
+            shotgunStack  = 0; magnetStack = 0; explosionStack = 0; pickupStoneStack = 0; lightningStack = 0; cellDivisionStack = 0;
             launchMult = BASE_LAUNCH;
             Object.keys(passiveActive).forEach(k => delete passiveActive[k]);
             panel.destroy(true);
@@ -1692,18 +1695,19 @@ function rebuildPassiveLines(scene) {
     uiPassiveLines.forEach(o => o.destroy());
     uiPassiveLines = [];
 
-    const STACK_OF = { '탄성증가': armMuscleStack,  '큰돌':      bigStoneStack,
-                       '파워업':   ironBallStack,   '조준선':    aimLineStack,
-                       '농구공':   basketballStack, '관통':      piercingStack,
-                       '자석탄':   magnetStack,     '돌을 줍다': pickupStoneStack,
-                       '산탄':     shotgunStack,    '폭발':      explosionStack,
-                       '번개탄':   lightningStack };
+    const STACK_OF = { '탄성증가': armMuscleStack,  '큰돌':       bigStoneStack,
+                       '파워업':   ironBallStack,   '조준선':     aimLineStack,
+                       '농구공':   basketballStack, '관통':       piercingStack,
+                       '자석탄':   magnetStack,     '돌을 줍다':  pickupStoneStack,
+                       '산탄':     shotgunStack,    '폭발':       explosionStack,
+                       '번개탄':   lightningStack,  '체세포분열': cellDivisionStack };
     const owned = Object.keys(STACK_OF).filter(k => STACK_OF[k] > 0);
 
     const PASSIVE_RARITY = {
-        '탄성증가': 'NORMAL', '파워업': 'NORMAL', '돌을 줍다': 'NORMAL',
-        '큰돌':   'RARE',   '조준선': 'RARE',   '농구공':   'RARE', '자석탄': 'RARE',
-        '관통':   'EPIC',   '산탄':   'EPIC',   '폭발':     'EPIC', '번개탄': 'EPIC',
+        '탄성증가': 'NORMAL', '파워업': 'NORMAL', '돌을 줍다':  'NORMAL',
+        '큰돌':   'RARE',   '조준선': 'RARE',   '농구공':    'RARE', '자석탄': 'RARE',
+        '관통':   'EPIC',   '산탄':   'EPIC',   '폭발':      'EPIC', '번개탄': 'EPIC',
+        '체세포분열': 'EPIC',
     };
     const PANEL_BADGE = { NORMAL: '[N]', RARE: '[R]', EPIC: '[E]' };
     const PANEL_COL   = { NORMAL: '#aaaaaa', RARE: '#44bbff', EPIC: '#cc66ff' };
@@ -1743,7 +1747,7 @@ function rebuildPassiveLines(scene) {
         const rarity   = PASSIVE_RARITY[name] ?? 'NORMAL';
         const badgeStr = PANEL_BADGE[rarity]   ?? '[N]';
         const tierCol  = PANEL_COL[rarity]     ?? '#aaaaaa';
-        const stackStr = name === '관통' ? '' : ` ×${STACK_OF[name]}`;
+        const stackStr = (name === '관통' || name === '체세포분열') ? '' : ` ×${STACK_OF[name]}`;
         const lineY    = BASE_Y + row * LINE_H;
 
         // 뱃지 — 티어 색상
@@ -2235,6 +2239,7 @@ function doFireStone(px, py) {
         s.magnetHitCooldown= 0;   // 자석탄 재타격 쿨다운 (관통 조합용)
         s.lightningTimer   = 0;
         s.hitBirds        = new Set();
+        s.splitGen        = 0;   // 체세포분열 세대 (0=원본)
         s.setAlpha(1);
 
         // 산탄: ±20° 추가 2방향 동시 발사 (ammo 소비 없음)
@@ -2259,6 +2264,7 @@ function doFireStone(px, py) {
                 sa.magnetHitCooldown= 0;
                 sa.lightningTimer   = 0;
                 sa.hitBirds        = new Set();
+                sa.splitGen        = 0;   // 체세포분열 세대 (0=원본)
                 sa.setAlpha(0.85);
             });
         }
@@ -2276,6 +2282,47 @@ function doFireStone(px, py) {
     }
     updateResearchBtn();
     // 다음 돌은 카메라 복귀 후 wipeReturn 콜백에서 로드됨
+}
+
+// ─── 체세포분열: 분열 돌멩이 생성 ───────────────────────
+const MAX_SPLIT_GEN = 3;   // 세대 0→1→2→3에서 분열 중지 (최대 1+2+4+8=15발)
+function spawnSplitStones(stone) {
+    if (!cellDivisionStack || !isOn('체세포분열')) return;
+    const gen = stone.splitGen ?? 0;
+    if (gen >= MAX_SPLIT_GEN) return;
+
+    const sx         = stone.x;
+    const sy         = stone.y;
+    const parentDmg  = stone.damage ?? STONE_DAMAGE;
+    const SPLIT_SPEED = 460;
+
+    // 분수(fountain) 형태: 수직 위를 기준으로 ±22° 두 갈래
+    [
+        -Math.PI / 2 - 0.385,   // 왼쪽 상향 (~-112°)
+        -Math.PI / 2 + 0.385,   // 오른쪽 상향 (~-68°)
+    ].forEach(angle => {
+        const ss = activeStones.get(sx, sy, 'stone');
+        if (!ss) return;
+        ss.setActive(true).setVisible(true).setDepth(1);
+        ss.setScale(0.44 - gen * 0.06);   // 세대가 높을수록 약간 작아짐
+        const HIT_CAP = 28;
+        ss.body.setSize(Math.min(ss.displayWidth, HIT_CAP), Math.min(ss.displayHeight, HIT_CAP));
+        ss.body.reset(sx, sy);
+        ss.body.allowGravity = true;
+        ss.setVelocity(Math.cos(angle) * SPLIT_SPEED, Math.sin(angle) * SPLIT_SPEED);
+        ss.body.setGravityY(0);
+        ss.damage            = parentDmg;
+        ss.bounceCount       = 0;
+        ss.settled           = false;
+        ss.magnetFired       = false;
+        ss.magnetTarget      = null;
+        ss.magnetTrackTime   = 0;
+        ss.magnetHitCooldown = 0;
+        ss.lightningTimer    = 0;
+        ss.hitBirds          = new Set();
+        ss.splitGen          = gen + 1;
+        ss.setAlpha(0.88);
+    });
 }
 
 // ─── 충돌: 돌멩이 vs 새 ──────────────────────────────
@@ -2318,10 +2365,14 @@ function hitBird(stone, bird) {
             targets: dmgTxt, y: dmgTxt.y - 45, alpha: 0,
             duration: 700, onComplete: () => dmgTxt.destroy()
         });
+        // 체세포분열: 새가 살아있어도 명중 시 분열
+        spawnSplitStones(stone);
         return;
     }
 
     // 새 처치
+    // 체세포분열: 새 처치 시에도 분열
+    spawnSplitStones(stone);
     const bx = bird.x, by = bird.y;
     const mat     = bird.materialValue ?? 10;
     const birdKey = bird.texture ? bird.texture.key : null;
@@ -2816,15 +2867,16 @@ function showPassiveSelection(scene, donatedAmt = 10) {
         { name: '관통',   desc: '돌이 명중 후에도 계속 날아가\n모든 오염 생물을 관통합니다!',              color: 0xaa44ff, rarity: 'EPIC'   },
         { name: '산탄',   desc: '발사 시 ±10° 방향으로 2개를 추가 발사!\n총 3방향 동시 공격.',              color: 0xaa44ff, rarity: 'EPIC'   },
         { name: '폭발',   desc: '명중 시 반경 130px 폭발!\n범위 내 모든 오염 생물에게 피해.',               color: 0xaa44ff, rarity: 'EPIC'   },
-        { name: '번개탄', desc: '비행 중 0.5초마다 반경 160px에\n번개가 내리쳐 주변 적을 공격합니다!',       color: 0xaa44ff, rarity: 'EPIC'   },
+        { name: '번개탄',    desc: '비행 중 0.5초마다 반경 160px에\n번개가 내리쳐 주변 적을 공격합니다!',         color: 0xaa44ff, rarity: 'EPIC'   },
+        { name: '체세포분열', desc: '명중 시 돌이 2개로 분열!\n분열한 돌도 명중하면 또 갈라집니다.',             color: 0xaa44ff, rarity: 'EPIC'   },
     ];
     // 현재 최대 스택에 도달한 패시브 제외
-    const stackOf = n => ({ '탄성증가': armMuscleStack,  '큰돌':      bigStoneStack,
-                             '파워업': ironBallStack,   '조준선':    aimLineStack,
-                             '농구공': basketballStack, '관통':      piercingStack,
-                             '자석탄': magnetStack,     '돌을 줍다': pickupStoneStack,
-                             '산탄':   shotgunStack,    '폭발':      explosionStack,
-                             '번개탄': lightningStack }[n] ?? 0);
+    const stackOf = n => ({ '탄성증가': armMuscleStack,  '큰돌':        bigStoneStack,
+                             '파워업': ironBallStack,   '조준선':      aimLineStack,
+                             '농구공': basketballStack, '관통':        piercingStack,
+                             '자석탄': magnetStack,     '돌을 줍다':   pickupStoneStack,
+                             '산탄':   shotgunStack,    '폭발':        explosionStack,
+                             '번개탄': lightningStack,  '체세포분열':  cellDivisionStack }[n] ?? 0);
     const maxStack = n => PASSIVE_MAX_STACK_OF[n] ?? PASSIVE_MAX_STACK;
     const available = ALL_PASSIVES.filter(p => stackOf(p.name) < maxStack(p.name));
 
@@ -2946,6 +2998,9 @@ function applyPassive(scene, passive) {
     } else if (passive.name === '번개탄') {
         if (lightningStack >= _ms('번개탄')) return;
         lightningStack++;
+    } else if (passive.name === '체세포분열') {
+        if (cellDivisionStack >= _ms('체세포분열')) return;
+        cellDivisionStack++;
     }
     // 첫 획득 시 토글 ON으로 초기화
     if (!(passive.name in passiveActive)) {
@@ -3048,8 +3103,9 @@ function restartGame(scene) {
     shotgunStack     = 0;
     magnetStack      = 0;
     explosionStack   = 0;
-    pickupStoneStack = 0;
-    lightningStack   = 0;
+    pickupStoneStack  = 0;
+    lightningStack    = 0;
+    cellDivisionStack = 0;
     launchMult     = BASE_LAUNCH;
 
     // 패시브 라인 초기화
@@ -3242,7 +3298,7 @@ function refreshPlayerPanel(hasPassives) {
         hasPassives = (armMuscleStack + bigStoneStack + ironBallStack
                      + aimLineStack + basketballStack + piercingStack
                      + shotgunStack + magnetStack + explosionStack
-                     + pickupStoneStack + lightningStack) > 0;
+                     + pickupStoneStack + lightningStack + cellDivisionStack) > 0;
     }
     const lines = [`STAGE  ${roundNumber}`];
     if (hasPassives) lines.push('', '── 강화 ──');
