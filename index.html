@@ -1262,13 +1262,40 @@ function preload() {
     mg.generateTexture('mechBird', 50, 50);
     mg.destroy();
 
+    // 방사능 돌연변이 새 — 뾰족한 날개·부리 (매처럼 날카로운 실루엣)
     const rg = this.make.graphics({ add: false });
-    // 후광 (붉은빛 — 위험한 적 강조)
-    rg.fillStyle(0xff6688, 0.18).fillEllipse(25, 25, 48, 36);
-    rg.fillStyle(0x4a2c2c, 1).fillRect(0, 10, 50, 30);
-    rg.fillStyle(0x3a2020, 1).fillRect(15, 0, 20, 10).fillRect(15, 40, 20, 10);
-    rg.fillStyle(0xff2020, 1).fillCircle(40, 25, 7);
-    rg.fillStyle(0xff8888, 1).fillCircle(40, 25, 3);
+    // ── 후광 (붉은빛 — 위협 강조) ──
+    rg.fillStyle(0xff4466, 0.22).fillEllipse(25, 25, 50, 38);
+
+    // ── 날개 (뒤로 swept된 뾰족한 검붉은 삼각) ──
+    // 윗 날개 — 좌상단 뒤로 길게 뻗음
+    rg.fillStyle(0x2a0a0a, 1).fillTriangle(28, 24, 0, 1, 26, 17);
+    // 아래 날개 — 좌하단 뒤로 길게 뻗음
+    rg.fillStyle(0x2a0a0a, 1).fillTriangle(28, 26, 0, 49, 26, 33);
+    // 날개 가장자리 외곽선 (검정 — 뾰족함 강조)
+    rg.lineStyle(1.5, 0x000000, 0.85);
+    rg.lineBetween(0, 1,  28, 24);
+    rg.lineBetween(0, 49, 28, 26);
+
+    // ── 본체 (적색 타원) ──
+    rg.fillStyle(0x5a1414, 1).fillEllipse(28, 25, 30, 18);
+    // 본체 윗 하이라이트
+    rg.fillStyle(0x8a2020, 1).fillEllipse(28, 22, 24, 6);
+    // 본체 아랫 그림자
+    rg.fillStyle(0x300808, 1).fillEllipse(28, 29, 24, 5);
+
+    // ── 머리 (둥근 적색 — 부리와 연결) ──
+    rg.fillStyle(0x6a1818, 1).fillCircle(37, 24, 7);
+
+    // ── 부리 (뾰족한 노란 삼각, 우측으로 길게) ──
+    rg.fillStyle(0xffaa20, 1).fillTriangle(38, 21, 49, 25, 38, 28);
+    rg.fillStyle(0xcc7710, 1).fillTriangle(38, 25, 47, 25, 38, 27);  // 입 음영
+
+    // ── 눈 (붉은 광채) ──
+    rg.fillStyle(0x000000, 1).fillCircle(36, 22, 3);
+    rg.fillStyle(0xff3030, 1).fillCircle(36, 22, 2);
+    rg.fillStyle(0xff9090, 1).fillCircle(35, 21, 1);
+
     rg.generateTexture('redBird', 50, 50);
     rg.destroy();
 
