@@ -76,6 +76,7 @@ const PASSIVE_MAX_STACK_OF = {
     '고철수집':     2,  // 적 처치 시 +1 (2스택 +3) 특수물질
     '중력무시':     1,  // 돌이 중력 무시하고 직선 비행
     '다발장전':     2,  // 0.2초 간격 추가 발사 (1스택 +1, 2스택 +2발)
+    '핵탄두':       1,  // LEGENDARY: 명중 시 화면 내 모든 적 즉사
 };
 
 // ─── 미니맵 + 패널 상수 ──────────────────────────────
@@ -96,14 +97,15 @@ const MM_WX0 = 0,    MM_WX1 = WORLD_LIMIT_X; // WORLD_LIMIT_X 와 동일
 // ─── 기증 절대량 기반 희귀도 테이블 ─────────────────────
 // minAmount 내림차순 유지. 기증량이 minAmount 이상이면 해당 행 적용.
 const RARITY_TABLE = [
-    { minAmount: 300, hint: 'EPIC 압도적  /  레어·노멀 소량',    weights: { NORMAL:  5, RARE: 25, EPIC: 70 } },
-    { minAmount: 200, hint: 'EPIC 우세  /  레어 일부',           weights: { NORMAL: 10, RARE: 40, EPIC: 50 } },
-    { minAmount: 120, hint: '레어·EPIC 혼전',                    weights: { NORMAL: 20, RARE: 50, EPIC: 30 } },
-    { minAmount:  80, hint: '레어 우세  /  EPIC 등장 가능',      weights: { NORMAL: 35, RARE: 50, EPIC: 15 } },
-    { minAmount:  50, hint: '레어 높음  /  EPIC 소량',           weights: { NORMAL: 55, RARE: 40, EPIC:  5 } },
-    { minAmount:  30, hint: '레어 등장 가능  /  노멀',           weights: { NORMAL: 75, RARE: 25, EPIC:  0 } },
-    { minAmount:  20, hint: '레어 소량  /  노멀',                weights: { NORMAL: 90, RARE: 10, EPIC:  0 } },
-    { minAmount:  10, hint: '노멀만 등장',                       weights: { NORMAL:100, RARE:  0, EPIC:  0 } },
+    { minAmount: 400, hint: '☢ LEGENDARY 등장 가능!  /  EPIC 우세', weights: { NORMAL:  3, RARE: 12, EPIC: 75, LEGENDARY: 10 } },
+    { minAmount: 300, hint: 'EPIC 압도적  /  LEGENDARY 소량',       weights: { NORMAL:  5, RARE: 22, EPIC: 70, LEGENDARY:  3 } },
+    { minAmount: 200, hint: 'EPIC 우세  /  레어 일부',              weights: { NORMAL: 10, RARE: 40, EPIC: 49, LEGENDARY:  1 } },
+    { minAmount: 120, hint: '레어·EPIC 혼전',                       weights: { NORMAL: 20, RARE: 50, EPIC: 30 } },
+    { minAmount:  80, hint: '레어 우세  /  EPIC 등장 가능',         weights: { NORMAL: 35, RARE: 50, EPIC: 15 } },
+    { minAmount:  50, hint: '레어 높음  /  EPIC 소량',              weights: { NORMAL: 55, RARE: 40, EPIC:  5 } },
+    { minAmount:  30, hint: '레어 등장 가능  /  노멀',              weights: { NORMAL: 75, RARE: 25, EPIC:  0 } },
+    { minAmount:  20, hint: '레어 소량  /  노멀',                   weights: { NORMAL: 90, RARE: 10, EPIC:  0 } },
+    { minAmount:  10, hint: '노멀만 등장',                          weights: { NORMAL:100, RARE:  0, EPIC:  0 } },
 ];
 
 // ┌─────────────────────────────────────────────────────────────────────┐
@@ -213,6 +215,7 @@ let recycleStack       = 0;  // 재활용 (NORMAL): 빈손 착지 시 확률적�
 let scrapCollectStack  = 0;  // 고철수집 (NORMAL): 적 처치 시 특수물질 +1/+3
 let gravityIgnoreStack = 0;  // 중력무시 (NORMAL): 돌이 중력 무시하고 직선 비행
 let burstLoadStack     = 0;  // 다발장전 (NORMAL): 0.2s 간격으로 추가 발사
+let nukeStack          = 0;  // 핵탄두 (LEGENDARY): 명중 즉시 화면 내 모든 적 즉사
 
 // ─── 패시브 토글 시스템 ──────────────────────────────
 // 각 발사마다 패시브 취사선택 가능. false = 이번 발사에서 비활성화
@@ -633,25 +636,28 @@ class IntroScene extends Phaser.Scene {
             { name: '폭발',        max: 1, rarity: 'EPIC',   get: () => explosionStack,     set: v => { explosionStack  = v; } },
             { name: '번개탄',      max: 1, rarity: 'EPIC',   get: () => lightningStack,     set: v => { lightningStack  = v; } },
             { name: '체세포분열',  max: 1, rarity: 'EPIC',   get: () => cellDivisionStack,  set: v => { cellDivisionStack = v; } },
+            // ── LEGENDARY (우측 끝, 1개) ────────────────────────
+            { name: '핵탄두',      max: 1, rarity: 'LEGENDARY', get: () => nukeStack,       set: v => { nukeStack       = v; } },
         ];
 
-        const rarityColor    = { NORMAL: '#aaaaaa', RARE: '#44bbff', EPIC: '#aa44ff' };
-        const rarityBgHex    = { NORMAL: 0x1a1a1a, RARE: 0x0a1e2c, EPIC: 0x1e0a2c };
+        const rarityColor    = { NORMAL: '#aaaaaa', RARE: '#44bbff', EPIC: '#aa44ff', LEGENDARY: '#ffaa00' };
+        const rarityBgHex    = { NORMAL: 0x1a1a1a, RARE: 0x0a1e2c, EPIC: 0x1e0a2c, LEGENDARY: 0x3a2400 };
 
-        // ── 3컬럼 티어별 레이아웃 ────────────────────────
+        // ── 4컬럼 티어별 레이아웃 (총 18항목) ─────────────
         const COL_BOUNDS = [
-            { tier: 'NORMAL', start: 0,  end: 7,  x:  20 },  // 좌측: 7항목
-            { tier: 'RARE',   start: 7,  end: 12, x: 440 },  // 중앙: 5항목
-            { tier: 'EPIC',   start: 12, end: 17, x: 860 },  // 우측: 5항목
+            { tier: 'NORMAL',    start:  0, end:  7, x:  14 },  // 7항목
+            { tier: 'RARE',      start:  7, end: 12, x: 326 },  // 5항목
+            { tier: 'EPIC',      start: 12, end: 17, x: 638 },  // 5항목
+            { tier: 'LEGENDARY', start: 17, end: 18, x: 950 },  // 1항목
         ];
 
         const rowY0    = 108;
         const rowH     = 76;
-        const NAME_DX  = 22;
-        const MINUS_DX = 270;
-        const STACK_DX = 320;
-        const PLUS_DX  = 370;
-        const COL_W    = 410;
+        const NAME_DX  = 14;
+        const MINUS_DX = 175;
+        const STACK_DX = 220;
+        const PLUS_DX  = 265;
+        const COL_W    = 305;
 
         // 컬럼 헤더 (티어 이름 큰 뱃지)
         COL_BOUNDS.forEach(({ tier, x }) => {
@@ -664,7 +670,8 @@ class IntroScene extends Phaser.Scene {
             panel.add(headerBg);
 
             panel.add(this.add.text(x + COL_W / 2, 84, tier, {
-                fontFamily: 'Arial Black', fontSize: '15px', color: tCol
+                fontFamily: 'Arial Black', fontSize: tier === 'LEGENDARY' ? '13px' : '15px',
+                color: tCol
             }).setOrigin(0.5));
         });
 
@@ -685,23 +692,23 @@ class IntroScene extends Phaser.Scene {
 
             // 패시브 이름 (티어 색상)
             panel.add(this.add.text(cx + NAME_DX, cy, def.name, {
-                fontFamily: '"Arial Black", Arial', fontSize: '20px', color: col
+                fontFamily: '"Arial Black", Arial', fontSize: '16px', color: col
             }).setOrigin(0, 0.5));
 
             // [-] 버튼
             const minusBtn = this.add.text(cx + MINUS_DX, cy, '[ - ]', {
-                fontFamily: 'Courier New', fontSize: '18px', color: '#ff6666'
+                fontFamily: 'Courier New', fontSize: '15px', color: '#ff6666'
             }).setOrigin(0.5).setInteractive({ useHandCursor: true });
 
             // 스택 숫자
             const stackTxt = this.add.text(cx + STACK_DX, cy, `${def.get()} / ${def.max}`, {
-                fontFamily: '"Arial Black", Arial', fontSize: '20px', color: '#ffffff'
+                fontFamily: '"Arial Black", Arial', fontSize: '16px', color: '#ffffff'
             }).setOrigin(0.5);
             stackTexts.push(stackTxt);
 
             // [+] 버튼
             const plusBtn = this.add.text(cx + PLUS_DX, cy, '[ + ]', {
-                fontFamily: 'Courier New', fontSize: '18px', color: '#44ff88'
+                fontFamily: 'Courier New', fontSize: '15px', color: '#44ff88'
             }).setOrigin(0.5).setInteractive({ useHandCursor: true });
 
             panel.add([minusBtn, stackTxt, plusBtn]);
@@ -736,11 +743,13 @@ class IntroScene extends Phaser.Scene {
             Object.keys(passiveActive).forEach(k => delete passiveActive[k]);
             const devNames  = ['탄성증가','파워업','돌을 줍다','재활용','고철수집','중력무시','다발장전',
                                '큰돌','조준선','농구공','그라운드 제로','자석탄',
-                               '관통','산탄','폭발','번개탄','체세포분열'];
+                               '관통','산탄','폭발','번개탄','체세포분열',
+                               '핵탄두'];
             const devStacks = [armMuscleStack, ironBallStack, pickupStoneStack, recycleStack,
                                scrapCollectStack, gravityIgnoreStack, burstLoadStack,
                                bigStoneStack, aimLineStack, basketballStack, groundZeroStack, magnetStack,
-                               piercingStack, shotgunStack, explosionStack, lightningStack, cellDivisionStack];
+                               piercingStack, shotgunStack, explosionStack, lightningStack, cellDivisionStack,
+                               nukeStack];
             devNames.forEach((n, i) => { if (devStacks[i] > 0) passiveActive[n] = true; });
             this.startGame();
         });
@@ -756,7 +765,7 @@ class IntroScene extends Phaser.Scene {
             // 패시브 초기화 (취소 시 원상복구)
             armMuscleStack = 0; bigStoneStack = 0; ironBallStack = 0;
             aimLineStack   = 0; piercingStack = 0; basketballStack = 0;
-            shotgunStack  = 0; magnetStack = 0; explosionStack = 0; pickupStoneStack = 0; lightningStack = 0; cellDivisionStack = 0; groundZeroStack = 0; recycleStack = 0; scrapCollectStack = 0; gravityIgnoreStack = 0; burstLoadStack = 0;
+            shotgunStack  = 0; magnetStack = 0; explosionStack = 0; pickupStoneStack = 0; lightningStack = 0; cellDivisionStack = 0; groundZeroStack = 0; recycleStack = 0; scrapCollectStack = 0; gravityIgnoreStack = 0; burstLoadStack = 0; nukeStack = 0;
             launchMult = BASE_LAUNCH;
             Object.keys(passiveActive).forEach(k => delete passiveActive[k]);
             panel.destroy(true);
@@ -1781,7 +1790,8 @@ function rebuildPassiveLines(scene) {
                        '재활용':   recycleStack,
                        '고철수집': scrapCollectStack,
                        '중력무시': gravityIgnoreStack,
-                       '다발장전': burstLoadStack };
+                       '다발장전': burstLoadStack,
+                       '핵탄두':   nukeStack };
     const owned = Object.keys(STACK_OF).filter(k => STACK_OF[k] > 0);
 
     const PASSIVE_RARITY = {
@@ -1791,9 +1801,10 @@ function rebuildPassiveLines(scene) {
         '자석탄': 'RARE',   '그라운드 제로': 'RARE',
         '관통':   'EPIC',   '산탄':   'EPIC',   '폭발':      'EPIC', '번개탄': 'EPIC',
         '체세포분열': 'EPIC',
+        '핵탄두': 'LEGENDARY',
     };
-    const PANEL_BADGE = { NORMAL: '[N]', RARE: '[R]', EPIC: '[E]' };
-    const PANEL_COL   = { NORMAL: '#aaaaaa', RARE: '#44bbff', EPIC: '#cc66ff' };
+    const PANEL_BADGE = { NORMAL: '[N]', RARE: '[R]', EPIC: '[E]', LEGENDARY: '[L]' };
+    const PANEL_COL   = { NORMAL: '#aaaaaa', RARE: '#44bbff', EPIC: '#cc66ff', LEGENDARY: '#ffaa00' };
 
     const LINE_H = 17;
     const BASE_Y = 103;   // "── 강화 ──" 헤더 직후 y
@@ -1830,7 +1841,8 @@ function rebuildPassiveLines(scene) {
         const rarity   = PASSIVE_RARITY[name] ?? 'NORMAL';
         const badgeStr = PANEL_BADGE[rarity]   ?? '[N]';
         const tierCol  = PANEL_COL[rarity]     ?? '#aaaaaa';
-        const stackStr = (name === '관통' || name === '체세포분열' || name === '그라운드 제로' || name === '중력무시')
+        const stackStr = (name === '관통' || name === '체세포분열' || name === '그라운드 제로'
+                          || name === '중력무시' || name === '핵탄두')
                          ? '' : ` ×${STACK_OF[name]}`;
         const lineY    = BASE_Y + row * LINE_H;
 
@@ -2277,6 +2289,192 @@ function spawnLightningFx(scene, cx, cy, radius) {
             if (i === 0) scene.cameras.main.shake(60, 0.007);
         });
     }
+}
+
+// ─── 핵탄두 (LEGENDARY): 명중 시 화면 전체 폭발 + 모든 적 즉사 ──
+function spawnNukeEffect(scene, x, y) {
+    if (!scene) return;
+    const cam  = scene.cameras.main;
+    const camW = config.width, camH = config.height;
+
+    // ══════ Phase 1: 즉시 백색 섬광 ══════
+    // 화면 전체 페이드 — 일순간 모든 것이 새하얗게
+    const screenFlash = scene.add.graphics().setDepth(30).setScrollFactor(0);
+    screenFlash.fillStyle(0xffffff, 1).fillRect(0, 0, camW, camH);
+    scene.tweens.add({ targets: screenFlash, alpha: 0,
+        duration: 700, ease: 'Quad.In',
+        onComplete: () => screenFlash.destroy() });
+
+    // 중심 백열구 — 폭발의 핵
+    const core = scene.add.graphics().setDepth(20).setPosition(x, y);
+    core.fillStyle(0xffffee, 1).fillCircle(0, 0, 50);
+    scene.tweens.add({ targets: core,
+        scaleX: 10, scaleY: 10, alpha: 0,
+        duration: 900, ease: 'Quad.Out',
+        onComplete: () => core.destroy() });
+
+    // ══════ Phase 2: 다층 충격파 링 (5겹 — 외곽으로 점점 확장) ══════
+    const RING_DEFS = [
+        { col: 0xffffff, lw: 8, delay:   0, dur:  900, finalScale: 16 },
+        { col: 0xffee44, lw: 6, delay:  80, dur:  950, finalScale: 22 },
+        { col: 0xff9900, lw: 5, delay: 160, dur: 1050, finalScale: 28 },
+        { col: 0xff5500, lw: 4, delay: 240, dur: 1150, finalScale: 34 },
+        { col: 0xcc2200, lw: 3, delay: 340, dur: 1250, finalScale: 40 },
+    ];
+    RING_DEFS.forEach(({ col, lw, delay, dur, finalScale }) => {
+        const ring = scene.add.graphics().setDepth(15).setPosition(x, y);
+        ring.lineStyle(lw, col, 1).strokeCircle(0, 0, 24);
+        scene.tweens.add({ targets: ring,
+            scaleX: finalScale, scaleY: finalScale, alpha: 0,
+            duration: dur, delay, ease: 'Cubic.Out',
+            onComplete: () => ring.destroy() });
+    });
+
+    // ══════ Phase 3: 16방향 광선 (빛살) ══════
+    for (let i = 0; i < 16; i++) {
+        const ang = (i / 16) * Math.PI * 2;
+        const ray = scene.add.graphics().setDepth(16).setPosition(x, y);
+        ray.fillStyle(0xffee44, 0.85).fillTriangle(0, -8, 0, 8, 220, 0);
+        ray.setRotation(ang);
+        scene.tweens.add({ targets: ray,
+            scaleX: 5, alpha: 0,
+            duration: 700, delay: 60, ease: 'Quad.Out',
+            onComplete: () => ray.destroy() });
+    }
+
+    // ══════ Phase 4: 버섯구름 ══════
+    // 줄기 (지면에서 위로 솟구침)
+    const stem = scene.add.graphics().setDepth(14).setPosition(x, GROUND_Y);
+    stem.fillStyle(0xdddddd, 0.85).fillRect(-50, -380, 100, 380);
+    stem.fillStyle(0xaaaaaa, 0.65).fillRect(-35, -370, 70, 370);
+    stem.setScale(1, 0.05);
+    scene.tweens.add({ targets: stem,
+        scaleY: 1, alpha: 0.7,
+        duration: 700, ease: 'Quad.Out' });
+    scene.tweens.add({ targets: stem,
+        alpha: 0, duration: 1500, delay: 1300, ease: 'Quad.In',
+        onComplete: () => stem.destroy() });
+
+    // 갓 (mushroom cap) — 위로 부풀어 오르고 좌우로 퍼짐
+    const cap = scene.add.graphics().setDepth(15).setPosition(x, GROUND_Y - 360);
+    cap.fillStyle(0xeeeeee, 0.85).fillCircle(0, 0, 80);
+    cap.fillStyle(0xbbbbbb, 0.6).fillCircle(-30, -10, 55);
+    cap.fillStyle(0xbbbbbb, 0.6).fillCircle(30, -10, 55);
+    cap.fillStyle(0x999999, 0.45).fillCircle(0, 5, 45);
+    cap.setScale(0.08);
+    cap.setAlpha(0.95);
+    scene.tweens.add({ targets: cap,
+        scaleX: 3.5, scaleY: 2.6,
+        y: GROUND_Y - 430,
+        duration: 950, delay: 350, ease: 'Cubic.Out' });
+    scene.tweens.add({ targets: cap, alpha: 0,
+        duration: 1400, delay: 1600, ease: 'Quad.In',
+        onComplete: () => cap.destroy() });
+
+    // ══════ Phase 5: 화면 전반에 흩날리는 잔열 입자 ══════
+    for (let i = 0; i < 32; i++) {
+        const ang = Math.random() * Math.PI * 2;
+        const speed = 200 + Math.random() * 450;
+        const startD = 20 + Math.random() * 40;
+        const sx = x + Math.cos(ang) * startD;
+        const sy = y + Math.sin(ang) * startD;
+
+        const isOrange = Math.random() < 0.55;
+        const ember = scene.add.graphics().setDepth(13).setPosition(sx, sy);
+        ember.fillStyle(isOrange ? 0xff8844 : 0xffeeaa, 1)
+             .fillCircle(0, 0, 3 + Math.random() * 3);
+
+        scene.tweens.add({ targets: ember,
+            x: sx + Math.cos(ang) * speed,
+            y: sy + Math.sin(ang) * speed,
+            scaleX: 0.2, scaleY: 0.2, alpha: 0,
+            duration: 800 + Math.random() * 700,
+            ease: 'Quad.Out',
+            onComplete: () => ember.destroy() });
+    }
+
+    // ══════ Phase 6: 카메라 강타 + 노란빛 잔상 ══════
+    cam.shake(1200, 0.035);
+    cam.flash(180, 255, 240, 200);
+
+    // ══════ Phase 7: '☢ 핵 탄 두 ☢' 자막 ══════
+    const subtitle = scene.add.text(640, 280, '☢  핵 탄 두  ☢', {
+        fontFamily: '"Arial Black", Arial',
+        fontSize: '72px',
+        color: '#ffee00',
+        stroke: '#aa0000',
+        strokeThickness: 10,
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(31);
+
+    subtitle.setAlpha(0).setScale(0.3);
+    scene.tweens.add({ targets: subtitle,
+        alpha: 1, scaleX: 1.15, scaleY: 1.15,
+        duration: 320, delay: 60, ease: 'Back.Out' });
+    scene.tweens.add({ targets: subtitle,
+        scaleX: 1.0, scaleY: 1.0,
+        duration: 180, delay: 380 });
+    scene.tweens.add({ targets: subtitle,
+        alpha: 0, y: 240,
+        duration: 700, delay: 1400, ease: 'Quad.In',
+        onComplete: () => subtitle.destroy() });
+}
+
+// ─── 핵탄두: 모든 적 즉사 처리 ──────────────────────────
+// 거리 기반 순차 폭발 (가까운 적부터 죽음 → 충격파 확장 느낌)
+function annihilateAllEnemies(scene, originX, originY) {
+    const targets = birds.getChildren().filter(b => b.active).slice();
+    if (targets.length === 0) return;
+
+    targets.forEach(b => {
+        if (!b.active) return;
+        const dist  = Phaser.Math.Distance.Between(originX, originY, b.x, b.y);
+        const delay = Math.min(950, dist * 0.18);  // 거리 기반 0~950ms
+
+        scene.time.delayedCall(delay, () => {
+            if (!b.active) return;
+            const bx = b.x, by = b.y;
+            const mat = b.materialValue ?? 10;
+            const bk  = b.texture?.key;
+
+            // 적 폭발 (작은 흰색 섬광 + 노란 잔불)
+            const puff = scene.add.graphics().setDepth(12).setPosition(bx, by);
+            puff.fillStyle(0xffeecc, 1).fillCircle(0, 0, 18);
+            scene.tweens.add({ targets: puff,
+                scaleX: 3, scaleY: 3, alpha: 0,
+                duration: 380, ease: 'Quad.Out',
+                onComplete: () => puff.destroy() });
+
+            // 4방향 작은 파편
+            for (let k = 0; k < 4; k++) {
+                const sAng = (k / 4) * Math.PI * 2 + Math.random() * 0.5;
+                const sDist = 25 + Math.random() * 20;
+                const sp = scene.add.graphics().setDepth(11).setPosition(bx, by);
+                sp.fillStyle(0xff9944, 1).fillCircle(0, 0, 3);
+                scene.tweens.add({ targets: sp,
+                    x: bx + Math.cos(sAng) * sDist,
+                    y: by + Math.sin(sAng) * sDist,
+                    alpha: 0, scaleX: 0.3, scaleY: 0.3,
+                    duration: 350, ease: 'Quad.Out',
+                    onComplete: () => sp.destroy() });
+            }
+
+            // 처치 처리
+            b.destroy();
+            roundBirdsHit++; roundMaterial += mat + getScrapBonus(); totalBirdsHit++;
+            remainingBirds = Math.max(0, remainingBirds - 1);
+            refreshMaterialHUD(); refreshRemainingHUD(); refreshPlayerPanel();
+
+            showKillFx(scene, bx, by, mat, bk);
+        });
+    });
+
+    // 모든 적 즉사 완료 후 라운드 클리어 체크
+    scene.time.delayedCall(1500, () => {
+        if (remainingBirds <= 0 && !isRoundEnding) {
+            isRoundEnding = true;
+            scene.time.delayedCall(500, () => showRoundClear(scene), [], scene);
+        }
+    });
 }
 
 // ─── 그라운드 제로 (RARE): 착지 시 하늘에서 수직 녹색 레이저 빔 ──
@@ -2747,6 +2945,15 @@ function hitBird(stone, bird) {
     if (stone.hitBirds.has(bird)) return;
     stone.hitBirds.add(bird);
 
+    // ── 핵탄두 (LEGENDARY): 명중 즉시 화면 내 모든 적 즉사 ──
+    // 데미지 처리 / 패시브 전부보다 우선 발동 → 돌은 폭발과 함께 소멸
+    if (nukeStack > 0 && isOn('핵탄두')) {
+        activeStones.killAndHide(stone);
+        spawnNukeEffect(this, stone.x, stone.y);
+        annihilateAllEnemies(this, stone.x, stone.y);
+        return;
+    }
+
     // ── 관통 패시브 (토글 반영) ─────────────────────
     if (piercingStack > 0 && isOn('관통')) {
         // 관통: 돌이 계속 날아감 (hitBirds로 중복 방지는 위에서 처리)
@@ -3175,12 +3382,14 @@ function showDonationUI(scene, roundEarned, stock) {
     barBg.fillStyle(0x222222, 1).fillRoundedRect(barX, barY, barW, barH, 6);
     uiOverlay.add(barBg);
 
-    const total = w.NORMAL + w.RARE + w.EPIC;
+    const legend = w.LEGENDARY ?? 0;
+    const total = w.NORMAL + w.RARE + w.EPIC + legend;
     let ox = barX;
     const segments = [
         { pct: w.NORMAL / total, color: 0x888888, label: '노멀' },
         { pct: w.RARE   / total, color: 0x44bbff, label: '레어' },
         { pct: w.EPIC   / total, color: 0xaa44ff, label: 'EPIC' },
+        { pct: legend   / total, color: 0xffaa00, label: 'LEGENDARY' },
     ];
     segments.forEach(seg => {
         if (seg.pct <= 0) return;
@@ -3196,6 +3405,7 @@ function showDonationUI(scene, roundEarned, stock) {
     if (w.NORMAL > 0) pctParts.push(`노멀 ${w.NORMAL}%`);
     if (w.RARE   > 0) pctParts.push(`레어 ${w.RARE}%`);
     if (w.EPIC   > 0) pctParts.push(`EPIC ${w.EPIC}%`);
+    if ((w.LEGENDARY ?? 0) > 0) pctParts.push(`LEGENDARY ${w.LEGENDARY}%`);
     mkText(scene, uiOverlay, 640, 406, pctParts.join('  /  '), {
         fontFamily: 'Arial', fontSize: '14px', color: '#dddddd', align: 'center'
     });
@@ -3223,6 +3433,7 @@ function getRarityHint(donated) {
     let detail = `노멀 ${w.NORMAL}%`;
     if (w.RARE  > 0) detail += `  /  레어 ${w.RARE}%`;
     if (w.EPIC  > 0) detail += `  /  EPIC ${w.EPIC}%`;
+    if ((w.LEGENDARY ?? 0) > 0) detail += `  /  LEGENDARY ${w.LEGENDARY}%`;
     return `${entry.hint}\n(${detail})`;
 }
 
@@ -3230,11 +3441,13 @@ function getRarityHint(donated) {
 function rollRarity(donatedAmt) {
     const row = RARITY_TABLE.find(r => donatedAmt >= r.minAmount) ?? RARITY_TABLE[RARITY_TABLE.length - 1];
     const w   = row.weights;
-    const total = w.NORMAL + w.RARE + w.EPIC;
+    const legend = w.LEGENDARY ?? 0;
+    const total = w.NORMAL + w.RARE + w.EPIC + legend;
     let rand = Math.random() * total;
     if ((rand -= w.NORMAL) < 0) return 'NORMAL';
     if ((rand -= w.RARE)   < 0) return 'RARE';
-    return 'EPIC';
+    if ((rand -= w.EPIC)   < 0) return 'EPIC';
+    return 'LEGENDARY';
 }
 
 // ─── 패시브 카드 선택 UI ──────────────────────────────
@@ -3271,6 +3484,7 @@ function showPassiveSelection(scene, donatedAmt = 10) {
         { name: '중력무시',   desc: '돌멩이가 중력을 무시하고\n직선으로 날아갑니다 (4.5초 후 소멸)',         color: 0x999999, rarity: 'NORMAL' },
         { name: '다발장전',   desc: '0.2초 간격으로 돌멩이를\n추가 발사합니다 (스택당 +1발)',                color: 0x999999, rarity: 'NORMAL' },
         { name: '다발장전',   desc: '0.2초 간격으로 돌멩이를\n추가 발사합니다 (스택당 +1발)',                color: 0x999999, rarity: 'NORMAL' },
+        { name: '핵탄두',    desc: '☢ 명중 즉시 화면 내\n모든 적이 즉사합니다!',                            color: 0xffaa00, rarity: 'LEGENDARY' },
         { name: '자석탄',   desc: '포물선 정점에서 가장 가까운 적으로\n궤도를 강제 수정합니다!',           color: 0x44bbff, rarity: 'RARE'   },
         { name: '큰돌',    desc: '돌멩이 크기가 2배가 됩니다.\n공격력도 2배가 됩니다!',                  color: 0x44bbff, rarity: 'RARE'   },
         { name: '큰돌',    desc: '돌멩이 크기가 2배가 됩니다.\n공격력도 2배가 됩니다!',                  color: 0x44bbff, rarity: 'RARE'   },
@@ -3297,7 +3511,8 @@ function showPassiveSelection(scene, donatedAmt = 10) {
                              '재활용': recycleStack,
                              '고철수집': scrapCollectStack,
                              '중력무시': gravityIgnoreStack,
-                             '다발장전': burstLoadStack }[n] ?? 0);
+                             '다발장전': burstLoadStack,
+                             '핵탄두': nukeStack }[n] ?? 0);
     const maxStack = n => PASSIVE_MAX_STACK_OF[n] ?? PASSIVE_MAX_STACK;
     const available = ALL_PASSIVES.filter(p => stackOf(p.name) < maxStack(p.name));
 
@@ -3327,9 +3542,9 @@ function showPassiveSelection(scene, donatedAmt = 10) {
 
     const CW = 260, CH = 310;
     // 티어별 뱃지 & 색상
-    const TIER_BADGE = { NORMAL: '[N]', RARE: '[R]', EPIC: '[E]' };   // 설명 앞 약자 뱃지
-    const TIER_LABEL = { NORMAL: 'NORMAL', RARE: 'RARE', EPIC: 'EPIC' }; // 카드 상단 전체 이름
-    const TIER_COLOR = { NORMAL: '#aaaaaa', RARE: '#44bbff', EPIC: '#cc66ff' };
+    const TIER_BADGE = { NORMAL: '[N]', RARE: '[R]', EPIC: '[E]', LEGENDARY: '[L]' };
+    const TIER_LABEL = { NORMAL: 'NORMAL', RARE: 'RARE', EPIC: 'EPIC', LEGENDARY: '☢ LEGENDARY ☢' };
+    const TIER_COLOR = { NORMAL: '#aaaaaa', RARE: '#44bbff', EPIC: '#cc66ff', LEGENDARY: '#ffaa00' };
 
     POOL.forEach((p, i) => {
         const cx       = 340 + i * (CW + 40);
@@ -3437,6 +3652,9 @@ function applyPassive(scene, passive) {
     } else if (passive.name === '다발장전') {
         if (burstLoadStack >= _ms('다발장전')) return;
         burstLoadStack++;
+    } else if (passive.name === '핵탄두') {
+        if (nukeStack >= _ms('핵탄두')) return;
+        nukeStack++;
     }
     // 첫 획득 시 토글 ON으로 초기화
     if (!(passive.name in passiveActive)) {
@@ -3547,6 +3765,7 @@ function restartGame(scene) {
     scrapCollectStack  = 0;
     gravityIgnoreStack = 0;
     burstLoadStack     = 0;
+    nukeStack          = 0;
     launchMult     = BASE_LAUNCH;
 
     // 패시브 라인 초기화
@@ -3741,7 +3960,8 @@ function refreshPlayerPanel(hasPassives) {
                      + shotgunStack + magnetStack + explosionStack
                      + pickupStoneStack + lightningStack + cellDivisionStack
                      + groundZeroStack + recycleStack
-                     + scrapCollectStack + gravityIgnoreStack + burstLoadStack) > 0;
+                     + scrapCollectStack + gravityIgnoreStack + burstLoadStack
+                     + nukeStack) > 0;
     }
     const lines = [`STAGE  ${roundNumber}`];
     if (hasPassives) lines.push('', '── 강화 ──');
