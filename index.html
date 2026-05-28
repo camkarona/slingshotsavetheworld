@@ -1774,7 +1774,7 @@ function update(time, delta) {
 
     // 드래그 중 슬링샷 틸트 — 드래그 방향대로 기울어짐
     // 탄성증가 스택이 쌓일수록 더 크게 기울어짐 (탄성이 강해짐을 시각화)
-    if (isDragging && currentStone && !_tiltTween) {
+    if (isDragging && currentStone && !_tiltTween && !isDungBallOn()) {
         const dx = currentStone.x - SLING_CENTER.x;
         const armBonus = (armMuscleStack > 0 && isOn('탄성증가')) ? armMuscleStack : 0;
         const maxTilt  = 0.20 + armBonus * 0.10;       // ±11° → ±17° → ±23° → ±29°
@@ -1784,6 +1784,19 @@ function update(time, delta) {
             _slingTilt = newTilt;
             redrawSlingStand();
             redrawTwinStand();
+        }
+    }
+
+    // 똥볼 차징 중 — 다리가 뒤로 올라감 (B급 감성 — 오래 누를수록 더 뒤로)
+    if (isDragging && isDungBallOn() && currentStone && !_kickerTween) {
+        const heldMs = Math.max(0, Date.now() - _kickChargeStart);
+        const charge = Math.min(1.0, heldMs / KICK_CHARGE_MAX);
+        // 풀차징 시 약간의 떨림 효과 (sin wave) — 잔뜩 긴장한 듯
+        const wobble = charge >= 0.95 ? Math.sin(Date.now() * 0.025) * 0.06 : 0;
+        const backLift = -(0.15 + charge * 1.0) + wobble;   // -0.15 ~ -1.15 (살짝 미리 들기 + 점점 더)
+        if (Math.abs(backLift - _kickerLegAngle) > 0.005) {
+            _kickerLegAngle = backLift;
+            redrawKicker();
         }
     }
 
@@ -1983,10 +1996,13 @@ function redrawKicker() {
     // 신발 (검정)
     uiKicker.fillStyle(0x080808, 1).fillRect(cx - 18, baseY - 7, legW + 4, 7);
 
-    // 오른다리 (차는 자세) — 라인+원으로 두꺼운 다리 표현
+    // 오른다리 — 차는 자세 / 차징 시 뒤로 들림 (양방향 swing 지원)
+    // kickProg > 0 : 앞으로 swing (실제 kick)
+    // kickProg < 0 : 뒤로 들림 (charging 자세, B급 감성)
     const hipX_R = cx + 10;
-    const footX  = hipX_R + 4 + kickProg * 34;     // 14 → 48 (앞쪽 스윙)
-    const footY  = baseY - 6 - kickProg * 30;       // 714 → 684 (위로 들림)
+    const liftAmt = Math.abs(kickProg);
+    const footX  = hipX_R + 4 + kickProg * 36;             // 음수면 뒤로 / 양수면 앞으로
+    const footY  = baseY - 6 - liftAmt * 32;               // 양쪽 모두 위로 들림
     uiKicker.lineStyle(legW, legColor, 1);
     uiKicker.lineBetween(hipX_R, hipY, footX, footY);
     // 양말
@@ -1994,11 +2010,20 @@ function redrawKicker() {
     const sockMid = { x: footX - (footX - hipX_R) * 0.12, y: footY - (footY - hipY) * 0.12 };
     const sockEnd = { x: footX - (footX - hipX_R) * 0.02, y: footY - (footY - hipY) * 0.02 };
     uiKicker.lineBetween(sockMid.x, sockMid.y, sockEnd.x, sockEnd.y);
-    // 신발 (검정 사각형)
+    // 신발 (검정 사각형) — 발 끝 위치에
     uiKicker.fillStyle(0x080808, 1);
     uiKicker.fillRect(footX - 6, footY - 4, legW + 6, 8);
 
-    // ── 차는 동작 swoosh ──
+    // ── 차징(뒤로 들기) 시 — 긴장감 표시 ──
+    if (kickProg < -0.3) {
+        // 땀방울 (머리 옆)
+        const drip = -kickProg;  // 0.3 ~ 1.0
+        uiKicker.fillStyle(0x66ccff, 0.9 * drip)
+            .fillCircle(cx - headR - 4, headY - 4 - drip * 4, 2 + drip);
+        // 살짝 떨림 효과 — 몸 전체 횡진동 (호출 측에서 random 적용)
+    }
+
+    // ── 차는 동작 swoosh (forward swing 일 때만) ──
     if (kickProg > 0.4) {
         uiKicker.lineStyle(3.5, 0xffffff, kickProg * 0.55);
         uiKicker.beginPath();
@@ -2051,20 +2076,33 @@ function drawKickChargeBar() {
     uiKickChargeLabel.setPosition(cx, cy - 2);
 }
 
-// 똥볼 발 차기 애니메이션 — Phaser 트윈 yoyo로 자연스러운 swing
+// 똥볼 발 차기 애니메이션 — 차징 후 강력한 forward swing
+// 현재 각도(차징으로 -1.15까지 뒤로 들린 상태)에서 시작 → peak forward → 0 복귀
 function triggerKickAnim() {
     if (!sceneRef) return;
     if (_kickerTween) _kickerTween.stop();
-    const obj = { v: 0 };
+    const startAngle = _kickerLegAngle;   // 보통 음수(뒤로 들림)
+    // 차징이 많을수록 강력하게 swing — 1.4~2.0 까지 forward peak
+    const peakForward = 1.4 + Math.min(0.6, Math.abs(startAngle) * 0.55);
+    const obj = { v: startAngle };
+    // 1단계: forward swing (빠르게 휘두름)
     _kickerTween = sceneRef.tweens.add({
         targets: obj,
-        v: { from: 0, to: 1.2 },
-        duration: 130,
+        v: peakForward,
+        duration: 100,
         ease: 'Quad.Out',
-        yoyo: true,
-        yoyoDelay: 60,
         onUpdate: () => { _kickerLegAngle = obj.v; redrawKicker(); },
-        onComplete: () => { _kickerLegAngle = 0; redrawKicker(); _kickerTween = null; }
+        onComplete: () => {
+            // 2단계: 서있는 자세로 복귀 (천천히)
+            sceneRef.tweens.add({
+                targets: obj,
+                v: 0,
+                duration: 380,
+                ease: 'Quad.Out',
+                onUpdate: () => { _kickerLegAngle = obj.v; redrawKicker(); },
+                onComplete: () => { _kickerLegAngle = 0; redrawKicker(); _kickerTween = null; }
+            });
+        }
     });
 }
 
