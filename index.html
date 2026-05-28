@@ -84,6 +84,7 @@ const PASSIVE_MAX_STACK_OF = {
     '새총개조':     2,  // 새총 높이 +50%/+100%
     '시간정지':     1,  // 발사 후 800ms 동안 모든 적 정지
     '파견':         1,  // 명중 위치(x축)로 다음 턴 슬링샷 이동
+    '똥볼':         1,  // 새총 사라지고 축구선수 등장 — 위쪽 호로 발사
     '분신':         1,  // RARE: 옆에 쌍둥이 새총 — 발사 시 함께 발사
     '핵탄두':       1,  // LEGENDARY: 명중 시 화면 내 모든 적 즉사
 };
@@ -229,6 +230,9 @@ let slingModStack      = 0;  // 새총개조 (NORMAL): 새총 높이 증가 (스
 let timeStopStack      = 0;  // 시간정지 (NORMAL): 발사 후 모든 적 정지
 let dispatchStack      = 0;  // 파견 (NORMAL): 명중 위치(x)로 다음 턴 슬링샷 이동
 let pendingDispatchX   = null;  // 파견 대기 위치 — wipeReturn 시 적용
+let dungBallStack      = 0;  // 똥볼 (NORMAL): 새총→축구선수, 위쪽 호 발사
+let _kickerLegAngle    = 0;  // 똥볼 다리 각도 (0=서있음, 1.2=차는 중)
+let _kickerTween       = null;
 let twinStack          = 0;  // 분신 (RARE): 쌍둥이 새총 동시 발사
 let _slingTilt         = 0;  // 슬링샷 현재 틸트 각도 (radian, 드래그/발사 애니용)
 let _tiltTween         = null;  // 슬링샷 틸트 트윈 (boing 효과)
@@ -261,6 +265,7 @@ let uiResearchBtn = null, uiResearchBtnTxt = null;  // 박사님 연구 버튼 (
 let uiPanelBg = null, uiPanelTitle = null, uiPanelContent = null;
 let uiSlingStand = null;   // 새총 거치대 그래픽 (새총개조 패시브로 동적 재렌더)
 let uiTwinStand  = null;   // 분신 쌍둥이 새총 그래픽 (분신 패시브 활성화 시만 표시)
+let uiKicker     = null;   // 똥볼 축구선수 그래픽 (똥볼 패시브 활성화 시만 표시)
 
 // 오버레이 버튼 히트 영역 — clearOverlay()로 초기화됨
 let overlayHitAreas = [];
@@ -645,6 +650,7 @@ class IntroScene extends Phaser.Scene {
             { name: '새총개조',    max: 2, rarity: 'NORMAL', get: () => slingModStack,      set: v => { slingModStack      = v; applySlingHeight(); } },
             { name: '시간정지',    max: 1, rarity: 'NORMAL', get: () => timeStopStack,      set: v => { timeStopStack      = v; } },
             { name: '파견',        max: 1, rarity: 'NORMAL', get: () => dispatchStack,      set: v => { dispatchStack      = v; } },
+            { name: '똥볼',        max: 1, rarity: 'NORMAL', get: () => dungBallStack,      set: v => { dungBallStack      = v; redrawSlingStand(); redrawTwinStand(); redrawKicker(); } },
             // ── RARE (중앙 컬럼, 7개) ───────────────────────────
             { name: '큰돌',        max: 3, rarity: 'RARE',   get: () => bigStoneStack,      set: v => { bigStoneStack   = v; } },
             { name: '조준선',      max: 2, rarity: 'RARE',   get: () => aimLineStack,       set: v => { aimLineStack    = v; } },
@@ -665,16 +671,16 @@ class IntroScene extends Phaser.Scene {
         const rarityColor    = { NORMAL: '#aaaaaa', RARE: '#44bbff', EPIC: '#aa44ff', LEGENDARY: '#ffaa00' };
         const rarityBgHex    = { NORMAL: 0x1a1a1a, RARE: 0x0a1e2c, EPIC: 0x1e0a2c, LEGENDARY: 0x3a2400 };
 
-        // ── 4컬럼 티어별 레이아웃 (총 22항목) ─────────────
+        // ── 4컬럼 티어별 레이아웃 (총 23항목) ─────────────
         const COL_BOUNDS = [
-            { tier: 'NORMAL',    start:  0, end: 10, x:  14 },  // 10항목
-            { tier: 'RARE',      start: 10, end: 17, x: 326 },  // 7항목
-            { tier: 'EPIC',      start: 17, end: 21, x: 638 },  // 4항목
-            { tier: 'LEGENDARY', start: 21, end: 22, x: 950 },  // 1항목
+            { tier: 'NORMAL',    start:  0, end: 11, x:  14 },  // 11항목
+            { tier: 'RARE',      start: 11, end: 18, x: 326 },  // 7항목
+            { tier: 'EPIC',      start: 18, end: 22, x: 638 },  // 4항목
+            { tier: 'LEGENDARY', start: 22, end: 23, x: 950 },  // 1항목
         ];
 
         const rowY0    = 100;
-        const rowH     = 56;   // 10행을 위해 더 압축
+        const rowH     = 52;   // 11행을 위해 더 압축
         const NAME_DX  = 14;
         const MINUS_DX = 175;
         const STACK_DX = 220;
@@ -763,12 +769,12 @@ class IntroScene extends Phaser.Scene {
             this.modalOpen = false;
             // DEV MODE 에서 설정한 패시브들 → 토글 ON으로 초기화
             Object.keys(passiveActive).forEach(k => delete passiveActive[k]);
-            const devNames  = ['탄성증가','파워업','돌을 줍다','재활용','고철수집','중력무시','다발장전','새총개조','시간정지','파견',
+            const devNames  = ['탄성증가','파워업','돌을 줍다','재활용','고철수집','중력무시','다발장전','새총개조','시간정지','파견','똥볼',
                                '큰돌','조준선','농구공','그라운드 제로','자석탄','폭발','분신',
                                '관통','산탄','번개탄','체세포분열',
                                '핵탄두'];
             const devStacks = [armMuscleStack, ironBallStack, pickupStoneStack, recycleStack,
-                               scrapCollectStack, gravityIgnoreStack, burstLoadStack, slingModStack, timeStopStack, dispatchStack,
+                               scrapCollectStack, gravityIgnoreStack, burstLoadStack, slingModStack, timeStopStack, dispatchStack, dungBallStack,
                                bigStoneStack, aimLineStack, basketballStack, groundZeroStack, magnetStack, explosionStack, twinStack,
                                piercingStack, shotgunStack, lightningStack, cellDivisionStack,
                                nukeStack];
@@ -787,7 +793,7 @@ class IntroScene extends Phaser.Scene {
             // 패시브 초기화 (취소 시 원상복구)
             armMuscleStack = 0; bigStoneStack = 0; ironBallStack = 0;
             aimLineStack   = 0; piercingStack = 0; basketballStack = 0;
-            shotgunStack  = 0; magnetStack = 0; explosionStack = 0; pickupStoneStack = 0; lightningStack = 0; cellDivisionStack = 0; groundZeroStack = 0; recycleStack = 0; scrapCollectStack = 0; gravityIgnoreStack = 0; burstLoadStack = 0; nukeStack = 0; slingModStack = 0; timeStopStack = 0; twinStack = 0; dispatchStack = 0; pendingDispatchX = null;
+            shotgunStack  = 0; magnetStack = 0; explosionStack = 0; pickupStoneStack = 0; lightningStack = 0; cellDivisionStack = 0; groundZeroStack = 0; recycleStack = 0; scrapCollectStack = 0; gravityIgnoreStack = 0; burstLoadStack = 0; nukeStack = 0; slingModStack = 0; timeStopStack = 0; twinStack = 0; dispatchStack = 0; pendingDispatchX = null; dungBallStack = 0;
             applySlingHeight();
             redrawTwinStand();
             launchMult = BASE_LAUNCH;
@@ -1271,8 +1277,11 @@ function create() {
     uiSlingStand = this.add.graphics();
     // 분신 쌍둥이 새총 — 분신 패시브 활성 시 표시
     uiTwinStand  = this.add.graphics();
+    // 똥볼 축구선수 — 똥볼 패시브 활성 시 표시
+    uiKicker     = this.add.graphics().setDepth(2);
     redrawSlingStand();
     redrawTwinStand();
+    redrawKicker();
 
     trajectoryGraphics = this.add.graphics();
     rubberBandGraphics = this.add.graphics();
@@ -1743,9 +1752,13 @@ function update(time, delta) {
     }
 
     // 드래그 중 슬링샷 틸트 — 드래그 방향대로 기울어짐
+    // 탄성증가 스택이 쌓일수록 더 크게 기울어짐 (탄성이 강해짐을 시각화)
     if (isDragging && currentStone && !_tiltTween) {
         const dx = currentStone.x - SLING_CENTER.x;
-        const newTilt = Phaser.Math.Clamp(dx / 700, -0.20, 0.20);   // 최대 ±~11°
+        const armBonus = (armMuscleStack > 0 && isOn('탄성증가')) ? armMuscleStack : 0;
+        const maxTilt  = 0.20 + armBonus * 0.10;       // ±11° → ±17° → ±23° → ±29°
+        const sensitivity = Math.max(400, 700 - armBonus * 100);  // 더 작은 드래그로도 더 기울어짐
+        const newTilt = Phaser.Math.Clamp(dx / sensitivity, -maxTilt, maxTilt);
         if (Math.abs(newTilt - _slingTilt) > 0.001) {
             _slingTilt = newTilt;
             redrawSlingStand();
@@ -1818,9 +1831,16 @@ function tiltedPoint(x, y, pivotX) {
     return { x: pivotX + dx * c - dy * s, y: pivotY + dx * s + dy * c };
 }
 
+function isDungBallOn() {
+    return dungBallStack > 0 && isOn('똥볼');
+}
+
 function redrawSlingStand() {
     if (!uiSlingStand) return;
     uiSlingStand.clear();
+    // 똥볼 패시브가 활성 시 새총 숨김 (축구선수로 대체)
+    uiSlingStand.setVisible(!isDungBallOn());
+    if (isDungBallOn()) return;
     const pivot = SLING_CENTER.x;
     // 폴 상단·하단 / 양 갈래 — 틸트 적용
     const top  = tiltedPoint(SLING_CENTER.x, SLING_CENTER.y, pivot);
@@ -1834,11 +1854,11 @@ function redrawSlingStand() {
     uiSlingStand.lineBetween(top.x, top.y, pR.x, pR.y);
 }
 
-// 분신 쌍둥이 새총 — 분신 패시브 ON 일 때만 표시
+// 분신 쌍둥이 새총 — 분신 패시브 ON 일 때만 표시 (단 똥볼 시 숨김)
 function redrawTwinStand() {
     if (!uiTwinStand) return;
     uiTwinStand.clear();
-    const visible = twinStack > 0 && isOn('분신');
+    const visible = twinStack > 0 && isOn('분신') && !isDungBallOn();
     uiTwinStand.setVisible(visible);
     if (!visible) return;
     const cx = SLING_CENTER.x + TWIN_OFFSET_X;
@@ -1856,6 +1876,82 @@ function redrawTwinStand() {
     uiTwinStand.lineBetween(top.x, top.y, pR.x, pR.y);
 }
 
+// ─── 똥볼 (NORMAL): 축구선수 스틱피겨 ──────────────────
+function redrawKicker() {
+    if (!uiKicker) return;
+    uiKicker.clear();
+    const active = isDungBallOn();
+    uiKicker.setVisible(active);
+    if (!active) return;
+
+    const cx = SLING_CENTER.x;
+    const baseY = 720;
+    const headY = baseY - 70;
+
+    // ── 그림자 ──
+    uiKicker.fillStyle(0x000000, 0.25).fillEllipse(cx, baseY - 1, 30, 6);
+
+    // ── 머리 (살빛 원 + 윤곽선) ──
+    uiKicker.fillStyle(0xddbb88, 1).fillCircle(cx, headY, 9);
+    uiKicker.lineStyle(2, 0x553311, 1).strokeCircle(cx, headY, 9);
+    // 눈 (작은 점)
+    uiKicker.fillStyle(0x000000, 1).fillCircle(cx - 3, headY - 1, 1.2)
+                                     .fillCircle(cx + 3, headY - 1, 1.2);
+
+    // ── 유니폼 상의 (빨간 네모) ──
+    uiKicker.fillStyle(0xdd2222, 1).fillRect(cx - 11, headY + 9, 22, 26);
+    uiKicker.fillStyle(0xffffff, 1).fillRect(cx - 11, headY + 23, 22, 3);  // 흰띠
+
+    // ── 팔 (스윙 자세 — 차는 동작과 반대 방향으로) ──
+    const kickProg = _kickerLegAngle;   // 0 ~ 1.2
+    uiKicker.lineStyle(4, 0xddbb88, 1);
+    // 왼팔 (앞으로 살짝)
+    uiKicker.lineBetween(cx - 9, headY + 14, cx - 16 + kickProg * 4, headY + 32);
+    // 오른팔 (뒤로 살짝)
+    uiKicker.lineBetween(cx + 9, headY + 14, cx + 16 - kickProg * 6, headY + 32);
+
+    // ── 반바지 (검은색) ──
+    uiKicker.fillStyle(0x222233, 1).fillRect(cx - 11, headY + 35, 22, 10);
+
+    // ── 다리 ──
+    uiKicker.lineStyle(5, 0xddbb88, 1);
+    // 왼다리 (서있는 — 고정)
+    uiKicker.lineBetween(cx - 5, headY + 45, cx - 9, baseY);
+    // 오른다리 (차는 자세 — kickProg 따라 앞으로 스윙)
+    const hipX = cx + 5;
+    const hipY = headY + 45;
+    const footX = cx + 9 + kickProg * 26;    // 9 → 40 (앞쪽으로 스윙)
+    const footY = baseY - kickProg * 22;     // 720 → 694 (위로 들림)
+    uiKicker.lineBetween(hipX, hipY, footX, footY);
+    // 신발 (검은 작은 사각형)
+    uiKicker.fillStyle(0x111111, 1).fillRect(footX - 4, footY - 2, 9, 4);
+
+    // ── 차는 동작 중일 때 swoosh 표시 ──
+    if (kickProg > 0.4) {
+        uiKicker.lineStyle(2, 0xffffff, kickProg * 0.6);
+        uiKicker.beginPath();
+        uiKicker.arc(hipX, hipY, 24 + kickProg * 8, -Math.PI * 0.3, Math.PI * 0.1, false);
+        uiKicker.strokePath();
+    }
+}
+
+// 똥볼 발 차기 애니메이션 — Phaser 트윈 yoyo로 자연스러운 swing
+function triggerKickAnim() {
+    if (!sceneRef) return;
+    if (_kickerTween) _kickerTween.stop();
+    const obj = { v: 0 };
+    _kickerTween = sceneRef.tweens.add({
+        targets: obj,
+        v: { from: 0, to: 1.2 },
+        duration: 130,
+        ease: 'Quad.Out',
+        yoyo: true,
+        yoyoDelay: 60,
+        onUpdate: () => { _kickerLegAngle = obj.v; redrawKicker(); },
+        onComplete: () => { _kickerLegAngle = 0; redrawKicker(); _kickerTween = null; }
+    });
+}
+
 function applySlingHeight() {
     const raise = getSlingRaise();
     SLING_CENTER.y = BASE_SLING_Y - raise;
@@ -1863,6 +1959,7 @@ function applySlingHeight() {
     PRONG_R.y      = BASE_PRONG_Y - raise;
     redrawSlingStand();
     redrawTwinStand();
+    redrawKicker();
     // 현재 장전된 돌 위치 갱신 (새총 머리에 붙어 있어야 함)
     if (currentStone && !isDragging) {
         currentStone.setPosition(SLING_CENTER.x, SLING_CENTER.y);
@@ -1885,6 +1982,7 @@ function applyPendingDispatch() {
     PRONG_R.x      += dx;
     redrawSlingStand();
     redrawTwinStand();
+    redrawKicker();
 
     // 도착 신호 — 새 위치에 작은 dust puff
     if (sceneRef) {
@@ -1941,6 +2039,7 @@ function rebuildPassiveLines(scene) {
                        '새총개조': slingModStack,
                        '시간정지': timeStopStack,
                        '파견':     dispatchStack,
+                       '똥볼':     dungBallStack,
                        '분신':     twinStack,
                        '핵탄두':   nukeStack };
     const owned = Object.keys(STACK_OF).filter(k => STACK_OF[k] > 0);
@@ -1948,7 +2047,7 @@ function rebuildPassiveLines(scene) {
     const PASSIVE_RARITY = {
         '탄성증가': 'NORMAL', '파워업': 'NORMAL', '돌을 줍다':  'NORMAL', '재활용': 'NORMAL',
         '고철수집': 'NORMAL', '중력무시': 'NORMAL', '다발장전': 'NORMAL', '새총개조': 'NORMAL',
-        '시간정지': 'NORMAL', '파견': 'NORMAL',
+        '시간정지': 'NORMAL', '파견': 'NORMAL', '똥볼': 'NORMAL',
         '큰돌':   'RARE',   '조준선': 'RARE',   '농구공':    'RARE',
         '자석탄': 'RARE',   '그라운드 제로': 'RARE', '폭발':   'RARE', '분신': 'RARE',
         '관통':   'EPIC',   '산탄':   'EPIC',   '번개탄': 'EPIC',
@@ -1995,7 +2094,8 @@ function rebuildPassiveLines(scene) {
         const tierCol  = PANEL_COL[rarity]     ?? '#aaaaaa';
         const stackStr = (name === '관통' || name === '체세포분열' || name === '그라운드 제로'
                           || name === '중력무시' || name === '핵탄두'
-                          || name === '시간정지' || name === '분신' || name === '파견')
+                          || name === '시간정지' || name === '분신' || name === '파견'
+                          || name === '똥볼')
                          ? '' : ` ×${STACK_OF[name]}`;
         const lineY    = BASE_Y + row * LINE_H;
 
@@ -2017,6 +2117,9 @@ function rebuildPassiveLines(scene) {
             if (name === '새총개조') applySlingHeight();   // 토글 즉시 새총 높이 반영
             if (name === '핵탄두')   applyStoneTint(currentStone);  // 토글 즉시 돌 색 갱신
             if (name === '분신')     redrawTwinStand();    // 토글 즉시 쌍둥이 새총 표시/숨김
+            if (name === '똥볼') {
+                redrawSlingStand(); redrawTwinStand(); redrawKicker();  // 새총↔축구선수 전환
+            }
             rebuildPassiveLines(scene);
         });
         nameObj.on('pointerover', () => { badgeObj.setAlpha(0.65); nameObj.setAlpha(0.65); });
@@ -2099,8 +2202,10 @@ function applyStoneTint(stone) {
 // ─── 고무줄 렌더링 ────────────────────────────────────
 function drawRubberBand() {
     rubberBandGraphics.clear();
-    rubberBandGraphics.lineStyle(6, 0xD2691E, 1);
     if (!currentStone) return;
+    // 똥볼 패시브 활성 시 고무줄 미표시 (새총 자체가 사라졌으므로)
+    if (isDungBallOn()) return;
+    rubberBandGraphics.lineStyle(6, 0xD2691E, 1);
     // 슬링샷이 기울었으면 prong 위치도 따라 회전 (rubber band가 자연스럽게 따라옴)
     const pL = tiltedPoint(PRONG_L.x, PRONG_L.y, SLING_CENTER.x);
     const pR = tiltedPoint(PRONG_R.x, PRONG_R.y, SLING_CENTER.x);
@@ -2286,8 +2391,11 @@ function startDrag(pointer) {
 function doDragAt(px, py) {
     if (!isDragging || !currentStone) return;
 
-    // 새총 중심 오른쪽으로 당기면 바다(왼쪽) 방향으로 발사됨 → 완전 차단
-    if (px > SLING_CENTER.x) {
+    // 새총 중심 오른쪽으로 당기면 왼쪽 방향으로 발사됨
+    // → 기본은 차단(바다 쪽이므로). 단 '파견' 패시브 활성 시 허용
+    //   (파견은 슬링샷을 맵 우측으로 이동시키므로 좌측 발사가 필요)
+    const allowLeftShot = dispatchStack > 0 && isOn('파견');
+    if (px > SLING_CENTER.x && !allowLeftShot) {
         currentStone.setPosition(SLING_CENTER.x, SLING_CENTER.y);
         trajectoryGraphics.clear();
         return;
@@ -3083,12 +3191,24 @@ function fireOneStone(angle, dist, isPrimary, originX, originY) {
     const s = activeStones.get(oX, oY, 'stone');
     if (!s) return null;
 
+    // 똥볼 패시브: 발사 각도를 위쪽으로 강제 보정 (축구공처럼 차올림)
+    let launchAngle = angle;
+    let launchSpeed = dist * effMult;
+    if (isDungBallOn()) {
+        // 드래그 방향에서 좌/우만 추출, 각도는 위쪽 60° 기준 (±15° 랜덤)
+        const goLeft     = Math.cos(angle) < 0;
+        const horizOffset = 0.30 + Math.random() * 0.18;   // 17° ~ 28°
+        launchAngle = -Math.PI / 2 + (goLeft ? -horizOffset : horizOffset);
+        launchAngle += (Math.random() - 0.5) * 0.28;       // 랜덤 흔들림 (똥볼)
+        launchSpeed = Math.max(launchSpeed, 600);          // 최소 강도 보장
+    }
+
     s.setActive(true).setVisible(true).setDepth(1);
     s.setScale(getStoneScale());
     s.body.setSize(Math.min(s.displayWidth, HIT_CAP), Math.min(s.displayHeight, HIT_CAP));
     s.body.reset(oX, oY);
     s.body.allowGravity = !noGravity;
-    s.setVelocity(Math.cos(angle) * dist * effMult, Math.sin(angle) * dist * effMult);
+    s.setVelocity(Math.cos(launchAngle) * launchSpeed, Math.sin(launchAngle) * launchSpeed);
     s.body.setGravityY(0);
     s.damage           = dmg;
     s.bounceCount      = 0;
@@ -3116,8 +3236,8 @@ function fireOneStone(angle, dist, isPrimary, originX, originY) {
             sa.body.setSize(Math.min(sa.displayWidth, HIT_CAP), Math.min(sa.displayHeight, HIT_CAP));
             sa.body.reset(oX, oY);
             sa.body.allowGravity = !noGravity;
-            sa.setVelocity(Math.cos(angle + offset) * dist * effMult,
-                           Math.sin(angle + offset) * dist * effMult);
+            sa.setVelocity(Math.cos(launchAngle + offset) * launchSpeed,
+                           Math.sin(launchAngle + offset) * launchSpeed);
             sa.body.setGravityY(0);
             sa.damage           = dmg;
             sa.bounceCount      = 0;
@@ -3185,8 +3305,8 @@ function triggerSlingBoing() {
     });
 }
 
-// ─── 시간정지 (NORMAL): 발사 후 모든 적 800ms 정지 ──────
-const TIME_STOP_DURATION = 800;
+// ─── 시간정지 (NORMAL): 발사 후 모든 적 3초 정지 ────────
+const TIME_STOP_DURATION = 3000;
 function triggerTimeStop(scene) {
     if (!scene) return;
     // 모든 적 velocity 저장 후 0으로 + tween 일시정지
@@ -3277,7 +3397,12 @@ function doFireStone(px, py) {
     }
 
     // ── 발사 시 슬링샷 boing 애니메이션 (Elastic.Out으로 탄성 복원) ──
-    triggerSlingBoing();
+    // 똥볼 활성 시 새총 대신 축구선수가 발 차기 애니메이션
+    if (isDungBallOn()) {
+        triggerKickAnim();
+    } else {
+        triggerSlingBoing();
+    }
 
     // ── 시간정지 패시브: 발사 즉시 모든 적 정지 ──
     if (timeStopStack > 0 && isOn('시간정지')) {
@@ -3930,6 +4055,7 @@ function showPassiveSelection(scene, donatedAmt = 10) {
         { name: '새총개조',   desc: '새총을 더 크게 개조!\n높이 +50% (2스택 시 2배)',                          color: 0x999999, rarity: 'NORMAL' },
         { name: '시간정지',   desc: '발사 후 0.8초간\n모든 적의 움직임이 정지!',                                color: 0x999999, rarity: 'NORMAL' },
         { name: '파견',       desc: '명중 시 다음 턴에\n새총이 그 위치로 이동합니다',                            color: 0x999999, rarity: 'NORMAL' },
+        { name: '똥볼',       desc: '새총 대신 축구선수 등장!\n공을 위쪽으로 차올립니다 (포물선 변경)',         color: 0x999999, rarity: 'NORMAL' },
         { name: '핵탄두',    desc: '☢ 명중 즉시 화면 내\n모든 적이 즉사합니다!',                            color: 0xffaa00, rarity: 'LEGENDARY' },
         { name: '자석탄',   desc: '포물선 정점에서 가장 가까운 적으로\n궤도를 강제 수정합니다!',           color: 0x44bbff, rarity: 'RARE'   },
         { name: '큰돌',    desc: '돌멩이 크기가 2배가 됩니다.\n공격력도 2배가 됩니다!',                  color: 0x44bbff, rarity: 'RARE'   },
@@ -3962,6 +4088,7 @@ function showPassiveSelection(scene, donatedAmt = 10) {
                              '새총개조': slingModStack,
                              '시간정지': timeStopStack,
                              '파견':   dispatchStack,
+                             '똥볼':   dungBallStack,
                              '분신':   twinStack,
                              '핵탄두': nukeStack }[n] ?? 0);
     const maxStack = n => PASSIVE_MAX_STACK_OF[n] ?? PASSIVE_MAX_STACK;
@@ -4117,6 +4244,12 @@ function applyPassive(scene, passive) {
     } else if (passive.name === '파견') {
         if (dispatchStack >= _ms('파견')) return;
         dispatchStack++;
+    } else if (passive.name === '똥볼') {
+        if (dungBallStack >= _ms('똥볼')) return;
+        dungBallStack++;
+        redrawSlingStand();   // 즉시 새총 → 축구선수 전환
+        redrawTwinStand();
+        redrawKicker();
     } else if (passive.name === '분신') {
         if (twinStack >= _ms('분신')) return;
         twinStack++;
@@ -4236,6 +4369,7 @@ function restartGame(scene) {
     timeStopStack      = 0;
     dispatchStack      = 0;
     pendingDispatchX   = null;
+    dungBallStack      = 0;
     twinStack          = 0;
     // 슬링샷 x 위치 원복 (파견으로 이동된 경우 복귀)
     const xReset = 320 - SLING_CENTER.x;
@@ -4244,6 +4378,7 @@ function restartGame(scene) {
     PRONG_R.x      += xReset;
     applySlingHeight();   // 새총 높이 원복 + redraw
     redrawTwinStand();    // 쌍둥이 새총 숨김
+    redrawKicker();       // 축구선수 숨김
     launchMult     = BASE_LAUNCH;
 
     // 패시브 라인 초기화
@@ -4440,7 +4575,7 @@ function refreshPlayerPanel(hasPassives) {
                      + groundZeroStack + recycleStack
                      + scrapCollectStack + gravityIgnoreStack + burstLoadStack
                      + nukeStack + slingModStack + timeStopStack + twinStack
-                     + dispatchStack) > 0;
+                     + dispatchStack + dungBallStack) > 0;
     }
     const lines = [`STAGE  ${roundNumber}`];
     if (hasPassives) lines.push('', '── 강화 ──');
