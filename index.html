@@ -77,7 +77,9 @@ const PASSIVE_MAX_STACK_OF = {
 
 // ─── 미니맵 상수 ──────────────────────────────────────
 const MM_X = 8,   MM_Y = 276;     // 미니맵 좌상단 — 패널(h=240) + 토글버튼(26px) 아래
-const MM_W = 220, MM_H = 158;     // 패널 너비에 맞춤
+const MM_W = 256, MM_H = 368;     // 패널 너비에 맞춤 (지면 근처까지 확장: 276+368=644)
+const PANEL_W = 256;              // 플레이어 정보 패널 너비
+const PANEL_CX = 8 + PANEL_W / 2; // 패널 중심 x = 136
 const MM_WY0 = -450, MM_WY1 = 800;
 const MM_WX0 = 0,    MM_WX1 = WORLD_LIMIT_X; // WORLD_LIMIT_X 와 동일
 
@@ -1301,8 +1303,8 @@ function create() {
     }).setOrigin(1, 0).setScrollFactor(0).setDepth(10).setVisible(false);
 
     // ─── 남은 오염 생물 카운터 (미니맵 바로 아래) ─────────
-    // MM_Y + MM_H = 276 + 158 = 434 → 아래 6px 여백 → 440
-    uiRemainingText = this.add.text(118, 440, '', {
+    // MM_Y + MM_H = 276 + 368 = 644 → 아래 8px 여백 → 652
+    uiRemainingText = this.add.text(PANEL_CX, 652, '', {
         fontFamily: '"Arial Black", Arial',
         fontSize: '14px',
         color: '#ffdd55',
@@ -1314,7 +1316,7 @@ function create() {
 
     // ─── Player Status 패널 (왼쪽) ────────────────────
     uiPanelBg = this.add.graphics().setScrollFactor(0).setDepth(8);
-    uiPanelTitle = this.add.text(118, 22, '◆  플레이어 정보', {
+    uiPanelTitle = this.add.text(PANEL_CX, 22, '◆  플레이어 정보', {
         fontFamily: 'Arial Black', fontSize: '15px', color: '#e8a030'
     }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(9);
     uiPanelContent = this.add.text(18, 52, '', {
@@ -1325,12 +1327,12 @@ function create() {
 
     // ─── 미니맵 토글 버튼 (패널 바로 아래, 영구 UI) ─────────
     uiMinimapBtnBg  = this.add.graphics().setScrollFactor(0).setDepth(9);
-    uiMinimapBtnTxt = this.add.text(118, 262, '● 미니맵  ON', {
+    uiMinimapBtnTxt = this.add.text(PANEL_CX, 262, '● 미니맵  ON', {
         fontFamily: 'Arial Black', fontSize: '14px', color: '#e8a030'
     }).setOrigin(0.5).setScrollFactor(0).setDepth(9);
     drawMinimapBtn(1.0);
     permanentHitAreas.push({
-        x: 118, y: 262, hw: 90, hh: 14,
+        x: PANEL_CX, y: 262, hw: 108, hh: 14,
         cb: () => {
             minimapVisible = !minimapVisible;
             if (!minimapVisible) minimapGraphics.clear();
@@ -1892,16 +1894,16 @@ function compensateHUDZoom() {
     p = f(640, 18);   uiRoundText.setPosition(p.x, p.y);
     p = f(640, 48);   uiAmmoText.setPosition(p.x, p.y);
     // uiPassiveText 는 숨김 상태 — 줌 보정 불필요
-    p = f(118, 440);  if (uiRemainingText) uiRemainingText.setPosition(p.x, p.y);
+    p = f(PANEL_CX, 652);  if (uiRemainingText) uiRemainingText.setPosition(p.x, p.y);
     p = f(1200, 20);  if (uiResearchBtnTxt) uiResearchBtnTxt.setPosition(p.x, p.y).setFontSize(`${15 / z}px`);
     p = f(1260, 58);  uiMaterialText.setPosition(p.x, p.y);
     p = f(1260, 84);  if (uiPollutionText) uiPollutionText.setPosition(p.x, p.y);
     // Player Status 패널 + 미니맵 토글 버튼
     drawPanelBg(z);
-    p = f(118, 22); if (uiPanelTitle)   uiPanelTitle.setPosition(p.x, p.y);
+    p = f(PANEL_CX, 22); if (uiPanelTitle)   uiPanelTitle.setPosition(p.x, p.y);
     p = f(18,  52); if (uiPanelContent) uiPanelContent.setPosition(p.x, p.y).setFontSize(`${14 / z}px`);
     drawMinimapBtn(z);
-    p = f(118, 262); if (uiMinimapBtnTxt) uiMinimapBtnTxt.setPosition(p.x, p.y).setFontSize(`${14 / z}px`);
+    p = f(PANEL_CX, 262); if (uiMinimapBtnTxt) uiMinimapBtnTxt.setPosition(p.x, p.y).setFontSize(`${14 / z}px`);
     // 조준화면으로 버튼은 화면 정중앙 → 위치는 불변, 크기만 역보정
     if (uiAimBtn) { uiAimBtn.setScale(1 / z); uiAimBtnTxt.setScale(1 / z); }
     // 패시브 라인 줌 보정 (각 오브젝트에 저장된 _hx, _hy, _fs 사용)
@@ -3043,7 +3045,7 @@ function showDonationUI(scene, roundEarned, stock) {
     uiOverlay = scene.add.container(0, 0).setDepth(50).setScrollFactor(0);
 
     mkRect(scene, uiOverlay, 0, 0, 1280, 720, 0x000000, 0.82);
-    mkPanel(scene, uiOverlay, 320, 130, 640, 460);
+    mkPanel(scene, uiOverlay, 320, 130, 640, 500);
 
     // 제목
     mkText(scene, uiOverlay, 640, 168, '🔬  박사님 연구실', {
@@ -3117,8 +3119,8 @@ function showDonationUI(scene, roundEarned, stock) {
         }, 17
     );
 
-    // 닫기 버튼
-    mkBtn(scene, uiOverlay, 640, 556, 160, 32, '취소', 0x222222, '#888888',
+    // 닫기 버튼 — '전량 기증' 버튼과 충분한 간격 (전량기증 하단 549 + 46 = 취소 상단)
+    mkBtn(scene, uiOverlay, 640, 595, 160, 32, '취소', 0x222222, '#888888',
         () => { clearOverlay(); updateResearchBtn(); }, 13
     );
 }
@@ -3593,8 +3595,8 @@ function drawMinimapBtn(z) {
     if (!uiMinimapBtnBg) return;
     uiMinimapBtnBg.clear();
     const cx = config.width / 2, cy = config.height / 2;
-    const bw = 180 / z, bh = 26 / z;
-    const x0 = cx + (118 - cx) / z - bw / 2;
+    const bw = 216 / z, bh = 26 / z;
+    const x0 = cx + (PANEL_CX - cx) / z - bw / 2;
     const y0 = cy + (262 - cy) / z - bh / 2;
     const bgCol  = minimapVisible ? 0x140e02 : 0x100c04;
     const borCol = minimapVisible ? 0xe8a030 : 0x4a3010;
@@ -3608,7 +3610,7 @@ function drawPanelBg(z) {
     const cx = config.width / 2, cy = config.height / 2;
     const x0 = cx + (8   - cx) / z;
     const y0 = cy + (8   - cy) / z;
-    const w  = 220 / z, h = _panelH / z;   // ← 동적 높이
+    const w  = PANEL_W / z, h = _panelH / z;   // ← 동적 높이
     uiPanelBg.fillStyle(0x110c02, 0.92).fillRoundedRect(x0, y0, w, h, 10 / z);
     uiPanelBg.lineStyle(1 / z, 0xe8a030, 0.40).strokeRoundedRect(x0, y0, w, h, 10 / z);
     // 제목 구분선
