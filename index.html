@@ -72,6 +72,7 @@ const PASSIVE_MAX_STACK_OF = {
     '번개탄':       1,  // 2초마다 주변 번개 공격
     '체세포분열':    1,  // 명중 시 2개로 분열, MAX_SPLIT_GEN까지 재귀
     '그라운드 제로': 1,  // 착지 시 하늘에서 수직 녹색 레이저 빔 강하
+    '재활용':       3,  // 빈손 착지 시 50%/75%/87.5% 확률로 돌멩이 회수
 };
 
 // ─── 미니맵 상수 ──────────────────────────────────────
@@ -200,6 +201,7 @@ let pickupStoneStack  = 0;  // 돌을 줍다 (NORMAL): 즉시 +2 돌멩이 (1회
 let lightningStack    = 0;  // 번개탄 (EPIC): 2초마다 주변 번개 공격
 let cellDivisionStack = 0;  // 체세포분열 (EPIC): 명중 시 돌이 2개로 분열
 let groundZeroStack   = 0;  // 그라운드 제로 (RARE): 착지 시 수직 레이저 빔 강하
+let recycleStack      = 0;  // 재활용 (NORMAL): 빈손 착지 시 확률적으로 돌멩이 회수
 
 // ─── 패시브 토글 시스템 ──────────────────────────────
 // 각 발사마다 패시브 취사선택 가능. false = 이번 발사에서 비활성화
@@ -598,11 +600,12 @@ class IntroScene extends Phaser.Scene {
             fontFamily: 'Arial', fontSize: '10px', color: '#445544'
         }).setOrigin(0.5));
 
-        // 패시브 정의
+        // 패시브 정의 (좌열 0~6 / 우열 7~13)
         const DEFS = [
             { name: '탄성증가',     max: 3, rarity: 'NORMAL', desc: '발사력 ×1.2 (스택당)',            get: () => armMuscleStack,    set: v => { armMuscleStack  = v; launchMult = BASE_LAUNCH * Math.pow(1.2, v); } },
             { name: '파워업',       max: 3, rarity: 'NORMAL', desc: '공격력 ×2 (스택당)',              get: () => ironBallStack,     set: v => { ironBallStack   = v; } },
             { name: '돌을 줍다',    max: 3, rarity: 'NORMAL', desc: '즉시 +2 돌멩이 (1회성)',          get: () => pickupStoneStack,  set: v => { pickupStoneStack = v; } },
+            { name: '재활용',       max: 3, rarity: 'NORMAL', desc: '빈손 착지 시 50/75/87.5% 회수',   get: () => recycleStack,      set: v => { recycleStack    = v; } },
             { name: '큰돌',        max: 3, rarity: 'RARE',   desc: '크기 ×2 + 공격력 ×2 (스택당)',   get: () => bigStoneStack,     set: v => { bigStoneStack   = v; } },
             { name: '조준선',      max: 2, rarity: 'RARE',   desc: '궤적 표시 (2=100%)',             get: () => aimLineStack,     set: v => { aimLineStack    = v; } },
             { name: '농구공',      max: 2, rarity: 'RARE',   desc: '1스택=1바운드 / 2=2바운드',      get: () => basketballStack,  set: v => { basketballStack = v; } },
@@ -617,7 +620,7 @@ class IntroScene extends Phaser.Scene {
 
         const rarityColor = { NORMAL: '#aaaaaa', RARE: '#44bbff', EPIC: '#aa44ff' };
 
-        // ── 2단 레이아웃 (13항목 → 좌 7 / 우 6) ──────────
+        // ── 2단 레이아웃 (14항목 → 좌 7 / 우 7) ──────────
         const ROWS     = 7;          // 열당 행 수
         const rowY0    = 88;         // 첫 행 y
         const rowH     = 82;         // 행 높이 (96→82 압축)
@@ -717,8 +720,8 @@ class IntroScene extends Phaser.Scene {
             this.modalOpen = false;
             // DEV MODE 에서 설정한 패시브들 → 토글 ON으로 초기화
             Object.keys(passiveActive).forEach(k => delete passiveActive[k]);
-            const devNames  = ['탄성증가','파워업','돌을 줍다','큰돌','조준선','농구공','그라운드 제로','관통','자석탄','산탄','폭발','번개탄','체세포분열'];
-            const devStacks = [armMuscleStack, ironBallStack, pickupStoneStack,
+            const devNames  = ['탄성증가','파워업','돌을 줍다','재활용','큰돌','조준선','농구공','그라운드 제로','관통','자석탄','산탄','폭발','번개탄','체세포분열'];
+            const devStacks = [armMuscleStack, ironBallStack, pickupStoneStack, recycleStack,
                                bigStoneStack, aimLineStack, basketballStack, groundZeroStack,
                                piercingStack, magnetStack, shotgunStack, explosionStack,
                                lightningStack, cellDivisionStack];
@@ -737,7 +740,7 @@ class IntroScene extends Phaser.Scene {
             // 패시브 초기화 (취소 시 원상복구)
             armMuscleStack = 0; bigStoneStack = 0; ironBallStack = 0;
             aimLineStack   = 0; piercingStack = 0; basketballStack = 0;
-            shotgunStack  = 0; magnetStack = 0; explosionStack = 0; pickupStoneStack = 0; lightningStack = 0; cellDivisionStack = 0; groundZeroStack = 0;
+            shotgunStack  = 0; magnetStack = 0; explosionStack = 0; pickupStoneStack = 0; lightningStack = 0; cellDivisionStack = 0; groundZeroStack = 0; recycleStack = 0;
             launchMult = BASE_LAUNCH;
             Object.keys(passiveActive).forEach(k => delete passiveActive[k]);
             panel.destroy(true);
@@ -1576,6 +1579,9 @@ function update(time, delta) {
                     spawnGroundZero(sceneRef, s.x);
                 }
 
+                // ── 재활용 패시브: 빈손 착지 시 확률적 회수 ──
+                tryRecycleStone(s);
+
                 const rollDist = Phaser.Math.Clamp(slideVX * 0.45, -340, 340);
                 const rollDur  = 650 + Math.abs(rollDist) * 2.0;
                 const spinDeg  = rollDist * 2.8;
@@ -1641,6 +1647,8 @@ function update(time, delta) {
 
         // 월드 이탈 (지면 아래로 빠진 경우 / 오른쪽 벽)
         if (s.y > 820 || s.x > WORLD_LIMIT_X) {
+            // 재활용 패시브: 화면 밖으로 떠난 경우에도 회수 시도
+            tryRecycleStone(s);
             activeStones.killAndHide(s);
         }
     });
@@ -1729,11 +1737,12 @@ function rebuildPassiveLines(scene) {
                        '자석탄':   magnetStack,     '돌을 줍다':      pickupStoneStack,
                        '산탄':     shotgunStack,    '폭발':           explosionStack,
                        '번개탄':   lightningStack,  '체세포분열':     cellDivisionStack,
-                       '그라운드 제로': groundZeroStack };
+                       '그라운드 제로': groundZeroStack,
+                       '재활용':   recycleStack };
     const owned = Object.keys(STACK_OF).filter(k => STACK_OF[k] > 0);
 
     const PASSIVE_RARITY = {
-        '탄성증가': 'NORMAL', '파워업': 'NORMAL', '돌을 줍다':  'NORMAL',
+        '탄성증가': 'NORMAL', '파워업': 'NORMAL', '돌을 줍다':  'NORMAL', '재활용': 'NORMAL',
         '큰돌':   'RARE',   '조준선': 'RARE',   '농구공':    'RARE',
         '자석탄': 'RARE',   '그라운드 제로': 'RARE',
         '관통':   'EPIC',   '산탄':   'EPIC',   '폭발':      'EPIC', '번개탄': 'EPIC',
@@ -2379,6 +2388,123 @@ function spawnGroundZero(scene, gx) {
     }
 }
 
+// ─── 재활용 (NORMAL): 빈손 착지 시 확률적으로 돌멩이 회수 ──
+// 스택별 확률: 1=50%, 2=75%, 3=87.5% (1 - 0.5^stack)
+// 메인 돌멩이만 대상 (산탄·분열 돌멩이 제외), 아무 적도 맞히지 않은 경우에 한함
+function tryRecycleStone(stone) {
+    if (!stone) return false;
+    if (recycleStack <= 0 || !isOn('재활용')) return false;
+    if (!stone.recyclable) return false;
+    if (stone.hitBirds && stone.hitBirds.size > 0) return false;
+
+    const chance = 1 - Math.pow(0.5, recycleStack);
+    if (Math.random() > chance) return false;
+
+    // 돌멩이 회수 (최대치 초과 방지)
+    if (currentAmmo < currentMaxAmmo) {
+        currentAmmo++;
+        if (uiAmmoText) uiAmmoText.setText(`남은 돌멩이: ${currentAmmo} / ${currentMaxAmmo}`);
+    }
+
+    // 중복 방지 — 동일 돌멩이가 settled+out_of_bounds 양쪽에서 트리거 되지 않도록
+    stone.recyclable = false;
+
+    // 자막 표시 + 지면 회수 비주얼
+    showRecycleSubtitle(sceneRef);
+    spawnRecycleFx(sceneRef, stone.x, Math.min(stone.y, GROUND_Y));
+    return true;
+}
+
+// 재활용 자막 — 화면 상단 중앙 (HUD 고정, 스케일·페이드 인 → 살짝 떠오르며 페이드 아웃)
+function showRecycleSubtitle(scene) {
+    if (!scene) return;
+    const W = 1280;
+
+    // 배경 글로우 (살짝 어두운 녹색 띠)
+    const bg = scene.add.graphics().setScrollFactor(0).setDepth(49);
+    bg.fillStyle(0x114422, 0.55).fillRoundedRect(W / 2 - 200, 158, 400, 56, 14);
+    bg.lineStyle(2, 0x44ff88, 0.85).strokeRoundedRect(W / 2 - 200, 158, 400, 56, 14);
+
+    const subtitle = scene.add.text(W / 2, 186, '♻  재활용 !  돌멩이 +1', {
+        fontFamily: '"Arial Black", Arial',
+        fontSize: '26px',
+        color: '#aaffcc',
+        stroke: '#000000',
+        strokeThickness: 4,
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(50);
+
+    subtitle.setAlpha(0).setScale(0.6);
+    bg.setAlpha(0);
+
+    // 등장: 살짝 튕기듯 확대
+    scene.tweens.add({
+        targets: subtitle,
+        alpha: 1, scale: 1,
+        duration: 220, ease: 'Back.Out'
+    });
+    scene.tweens.add({
+        targets: bg, alpha: 1,
+        duration: 180, ease: 'Quad.Out'
+    });
+
+    // 유지 후 살짝 떠오르며 페이드 아웃
+    scene.tweens.add({
+        targets: [subtitle, bg],
+        y: '-=24', alpha: 0,
+        duration: 550,
+        delay: 950,
+        ease: 'Quad.In',
+        onComplete: () => { subtitle.destroy(); bg.destroy(); }
+    });
+}
+
+// 재활용 성공 위치 비주얼 — 돌멩이가 빛이 되어 새총으로 돌아가는 연출
+function spawnRecycleFx(scene, fx, fy) {
+    if (!scene) return;
+
+    // 1) 지면에서 녹색 ♻ 회수 링 (점차 좁아짐 — 빨려들어가는 느낌)
+    const ring = scene.add.graphics().setDepth(7).setPosition(fx, fy);
+    ring.lineStyle(3, 0x66ff99, 1).strokeCircle(0, 0, 36);
+    scene.tweens.add({ targets: ring, scaleX: 0.2, scaleY: 0.2, alpha: 0,
+        duration: 340, ease: 'Quad.In',
+        onComplete: () => ring.destroy() });
+
+    // 2) 6개 녹색 입자가 새총 쪽으로 빨려가는 곡선
+    for (let i = 0; i < 6; i++) {
+        const startAng = (i / 6) * Math.PI * 2;
+        const startDist = 18 + Math.random() * 14;
+        const px = fx + Math.cos(startAng) * startDist;
+        const py = fy + Math.sin(startAng) * startDist;
+
+        const dot = scene.add.graphics().setDepth(8).setPosition(px, py);
+        dot.fillStyle(0xaaffcc, 1).fillCircle(0, 0, 3);
+
+        // 새총 위치로 곡선 이동 (중간점에 살짝 위로 올라가는 호)
+        scene.tweens.add({
+            targets: dot,
+            x: SLING_CENTER.x,
+            y: SLING_CENTER.y - 10,
+            alpha: 0,
+            scaleX: 0.4, scaleY: 0.4,
+            duration: 600 + i * 30,
+            delay: i * 20,
+            ease: 'Cubic.In',
+            onComplete: () => dot.destroy()
+        });
+    }
+
+    // 3) 새총 부근에 짧은 녹색 점멸 (도착 표시)
+    scene.time.delayedCall(620, () => {
+        const arrival = scene.add.graphics().setDepth(8)
+            .setPosition(SLING_CENTER.x, SLING_CENTER.y - 10);
+        arrival.fillStyle(0xaaffcc, 1).fillCircle(0, 0, 10);
+        scene.tweens.add({ targets: arrival,
+            scaleX: 2.4, scaleY: 2.4, alpha: 0,
+            duration: 280, ease: 'Quad.Out',
+            onComplete: () => arrival.destroy() });
+    });
+}
+
 // ─── 발사 ─────────────────────────────────────────────
 function doFireStone(px, py) {
     if (!isDragging || !currentStone) return;
@@ -2424,6 +2550,7 @@ function doFireStone(px, py) {
         s.lightningTimer   = 0;
         s.hitBirds        = new Set();
         s.splitGen        = 0;   // 체세포분열 세대 (0=원본)
+        s.recyclable      = true;  // 재활용 대상 — 사용자가 직접 발사한 메인 돌멩이만
         s.setAlpha(1);
 
         // 산탄: ±20° 추가 2방향 동시 발사 (ammo 소비 없음)
@@ -2449,6 +2576,7 @@ function doFireStone(px, py) {
                 sa.lightningTimer   = 0;
                 sa.hitBirds        = new Set();
                 sa.splitGen        = 0;   // 체세포분열 세대 (0=원본)
+                sa.recyclable      = false;  // 산탄 추가 돌멩이는 재활용 대상 아님
                 sa.setAlpha(0.85);
             });
         }
@@ -2505,6 +2633,7 @@ function spawnSplitStones(stone) {
         ss.lightningTimer    = 0;
         ss.hitBirds          = new Set();
         ss.splitGen          = gen + 1;
+        ss.recyclable        = false;  // 분열 돌멩이는 재활용 대상 아님
         ss.setAlpha(0.88);
     });
 }
@@ -3040,6 +3169,9 @@ function showPassiveSelection(scene, donatedAmt = 10) {
         { name: '돌을 줍다', desc: '돌멩이를 2개 추가합니다.\n(즉시 지급 · 1회성)',                       color: 0x999999, rarity: 'NORMAL' },
         { name: '돌을 줍다', desc: '돌멩이를 2개 추가합니다.\n(즉시 지급 · 1회성)',                       color: 0x999999, rarity: 'NORMAL' },
         { name: '돌을 줍다', desc: '돌멩이를 2개 추가합니다.\n(즉시 지급 · 1회성)',                       color: 0x999999, rarity: 'NORMAL' },
+        { name: '재활용',    desc: '빈손 착지 시 50%/75%/87.5% 확률로\n돌멩이를 돌려받습니다 (스택별 누적)', color: 0x999999, rarity: 'NORMAL' },
+        { name: '재활용',    desc: '빈손 착지 시 50%/75%/87.5% 확률로\n돌멩이를 돌려받습니다 (스택별 누적)', color: 0x999999, rarity: 'NORMAL' },
+        { name: '재활용',    desc: '빈손 착지 시 50%/75%/87.5% 확률로\n돌멩이를 돌려받습니다 (스택별 누적)', color: 0x999999, rarity: 'NORMAL' },
         { name: '자석탄',   desc: '포물선 정점에서 가장 가까운 적으로\n궤도를 강제 수정합니다!',           color: 0x44bbff, rarity: 'RARE'   },
         { name: '큰돌',    desc: '돌멩이 크기가 2배가 됩니다.\n공격력도 2배가 됩니다!',                  color: 0x44bbff, rarity: 'RARE'   },
         { name: '큰돌',    desc: '돌멩이 크기가 2배가 됩니다.\n공격력도 2배가 됩니다!',                  color: 0x44bbff, rarity: 'RARE'   },
@@ -3062,7 +3194,8 @@ function showPassiveSelection(scene, donatedAmt = 10) {
                              '자석탄': magnetStack,     '돌을 줍다':    pickupStoneStack,
                              '산탄':   shotgunStack,    '폭발':         explosionStack,
                              '번개탄': lightningStack,  '체세포분열':   cellDivisionStack,
-                             '그라운드 제로': groundZeroStack }[n] ?? 0);
+                             '그라운드 제로': groundZeroStack,
+                             '재활용': recycleStack }[n] ?? 0);
     const maxStack = n => PASSIVE_MAX_STACK_OF[n] ?? PASSIVE_MAX_STACK;
     const available = ALL_PASSIVES.filter(p => stackOf(p.name) < maxStack(p.name));
 
@@ -3190,6 +3323,9 @@ function applyPassive(scene, passive) {
     } else if (passive.name === '그라운드 제로') {
         if (groundZeroStack >= _ms('그라운드 제로')) return;
         groundZeroStack++;
+    } else if (passive.name === '재활용') {
+        if (recycleStack >= _ms('재활용')) return;
+        recycleStack++;
     }
     // 첫 획득 시 토글 ON으로 초기화
     if (!(passive.name in passiveActive)) {
@@ -3296,6 +3432,7 @@ function restartGame(scene) {
     lightningStack    = 0;
     cellDivisionStack = 0;
     groundZeroStack   = 0;
+    recycleStack      = 0;
     launchMult     = BASE_LAUNCH;
 
     // 패시브 라인 초기화
@@ -3489,7 +3626,7 @@ function refreshPlayerPanel(hasPassives) {
                      + aimLineStack + basketballStack + piercingStack
                      + shotgunStack + magnetStack + explosionStack
                      + pickupStoneStack + lightningStack + cellDivisionStack
-                     + groundZeroStack) > 0;
+                     + groundZeroStack + recycleStack) > 0;
     }
     const lines = [`STAGE  ${roundNumber}`];
     if (hasPassives) lines.push('', '── 강화 ──');
