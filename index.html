@@ -1709,8 +1709,9 @@ function update(time, delta) {
                 target.y - CAM_FOLLOW_OFFSET_Y - config.height / 2,
                 WORLD_TOP, WORLD_TOP + WORLD_H - config.height
             );
-            cam.scrollX = Phaser.Math.Linear(cam.scrollX, tx, 0.1);
-            cam.scrollY = Phaser.Math.Linear(cam.scrollY, ty, 0.1);
+            // 지연팔로업 매우 약하게 — 0.1 → 0.35 (3.5배 빠른 추적)
+            cam.scrollX = Phaser.Math.Linear(cam.scrollX, tx, 0.35);
+            cam.scrollY = Phaser.Math.Linear(cam.scrollY, ty, 0.35);
         }
         if (!isRoundEnding && activeStones.countActive(true) === 0) {
             cameraFollowing = false;
@@ -1721,6 +1722,7 @@ function update(time, delta) {
     drawHpBars();
     drawRubberBand();
     compensateHUDZoom();
+    updateHUDFade();
 
     // 미니맵은 4프레임마다 갱신 (성능 최적화)
     minimapFrame++;
@@ -1872,6 +1874,9 @@ function rebuildPassiveLines(scene) {
 
     // 헤더(STAGE N / 강화 구분선) 갱신 + 패널 배경 재렌더
     refreshPlayerPanel(owned.length > 0);
+
+    // 페이드 상태 동기화 (발사 중에 패시브 라인이 새로 생긴 경우 대비)
+    if (_hudFaded) uiPassiveLines.forEach(o => o.setAlpha(0.30));
 }
 
 function getStoneScale() {
@@ -1937,6 +1942,7 @@ function drawRubberBand() {
 // zoom 이 바뀔 때만 world 위치를 역산해 보정 (매 프레임 불필요 연산 방지).
 let _lastHUDZoom = 1.0;
 let _panelH      = PANEL_MIN_H;   // 패널 배경 현재 높이 (screen px) — rebuildPassiveLines에서 동적 갱신
+let _hudFaded    = false;          // 현재 좌측 HUD 페이드 상태
 function compensateHUDZoom() {
     const z = sceneRef.cameras.main.zoom;
     if (Math.abs(z - _lastHUDZoom) < 0.001) return;
@@ -1964,6 +1970,31 @@ function compensateHUDZoom() {
     uiPassiveLines.forEach(obj => {
         const p2 = f(obj._hx ?? 18, obj._hy ?? 103);
         obj.setPosition(p2.x, p2.y).setFontSize(`${(obj._fs ?? 13) / z}px`);
+    });
+}
+
+// ─── 좌측 HUD 페이드 (발사·조준 중 시야 확보) ─────────
+// isDragging 또는 cameraFollowing 동안 30%로 페이드, 그 외 100% 복귀
+function updateHUDFade() {
+    const shouldFade = isDragging || cameraFollowing;
+    if (shouldFade === _hudFaded) return;
+    _hudFaded = shouldFade;
+
+    const targetAlpha = shouldFade ? 0.30 : 1.0;
+    const elems = [
+        uiPanelBg, uiPanelTitle, uiPanelContent,
+        uiMinimapBtnBg, uiMinimapBtnTxt,
+        minimapGraphics, uiRemainingText,
+        ...uiPassiveLines,
+    ].filter(o => o != null);
+
+    if (elems.length === 0) return;
+    sceneRef.tweens.killTweensOf(elems);
+    sceneRef.tweens.add({
+        targets: elems,
+        alpha: targetAlpha,
+        duration: 280,
+        ease: 'Quad.Out',
     });
 }
 
@@ -2419,10 +2450,26 @@ function spawnNukeEffect(scene, x, y) {
         onComplete: () => subtitle.destroy() });
 }
 
-// ─── 핵탄두: 모든 적 즉사 처리 ──────────────────────────
+// ─── 핵탄두: 화면(카메라 뷰) 내 모든 적 즉사 ────────────
+// "화면에 나타난 적"만 죽임 — 카메라 worldView 안의 적만 대상
 // 거리 기반 순차 폭발 (가까운 적부터 죽음 → 충격파 확장 느낌)
 function annihilateAllEnemies(scene, originX, originY) {
-    const targets = birds.getChildren().filter(b => b.active).slice();
+    // 화면(카메라 뷰) 영역 계산
+    const cam   = scene.cameras.main;
+    const view  = cam.worldView;   // Rectangle: x, y, width, height — 현재 카메라가 보고 있는 월드 영역
+    // worldView가 즉시 갱신되지 않은 경우(스크롤 직후) 대비해 매뉴얼 계산도 fallback
+    const minX  = view ? view.x : cam.scrollX;
+    const minY  = view ? view.y : cam.scrollY;
+    const maxX  = minX + (view ? view.width  : config.width  / cam.zoom);
+    const maxY  = minY + (view ? view.height : config.height / cam.zoom);
+    const PAD   = 30;  // 화면 가장자리 여유 (살짝 밖에 있어도 OK)
+
+    const targets = birds.getChildren().filter(b => {
+        if (!b.active) return false;
+        // 화면 영역 내(약간 여유 포함)에 있는 적만
+        return b.x >= minX - PAD && b.x <= maxX + PAD
+            && b.y >= minY - PAD && b.y <= maxY + PAD;
+    }).slice();
     if (targets.length === 0) return;
 
     targets.forEach(b => {
