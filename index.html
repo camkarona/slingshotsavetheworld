@@ -1223,6 +1223,8 @@ function preload() {
     sg.destroy();
 
     const mg = this.make.graphics({ add: false });
+    // 후광 (배경에서 떠보이도록 — 시원한 청록빛)
+    mg.fillStyle(0xaaffcc, 0.18).fillEllipse(25, 25, 48, 36);
     mg.fillStyle(0x34495e, 1).fillRect(0, 10, 50, 30);
     mg.fillStyle(0x2c3e50, 1).fillRect(15, 0, 20, 10).fillRect(15, 40, 20, 10);
     mg.fillStyle(0x39ff14, 1).fillCircle(40, 25, 6);
@@ -1230,6 +1232,8 @@ function preload() {
     mg.destroy();
 
     const rg = this.make.graphics({ add: false });
+    // 후광 (붉은빛 — 위험한 적 강조)
+    rg.fillStyle(0xff6688, 0.18).fillEllipse(25, 25, 48, 36);
     rg.fillStyle(0x4a2c2c, 1).fillRect(0, 10, 50, 30);
     rg.fillStyle(0x3a2020, 1).fillRect(15, 0, 20, 10).fillRect(15, 40, 20, 10);
     rg.fillStyle(0xff2020, 1).fillCircle(40, 25, 7);
@@ -1238,6 +1242,8 @@ function preload() {
     rg.destroy();
 
     const dg = this.make.graphics({ add: false });
+    // 후광 (시안빛 — 기계 드론 느낌)
+    dg.fillStyle(0x88ddff, 0.18).fillEllipse(25, 25, 44, 44);
     dg.fillStyle(0x445566, 1).fillRect(18, 18, 14, 14);
     dg.fillStyle(0x556677, 1);
     dg.fillRect(4, 22, 14, 6).fillRect(32, 22, 14, 6);
@@ -1251,6 +1257,8 @@ function preload() {
 
     // 나방 (지상 근처 약한 적)
     const mothg = this.make.graphics({ add: false });
+    // 후광 (따뜻한 크림빛 — 지상 녹색에서 떠보이도록)
+    mothg.fillStyle(0xffeecc, 0.18).fillEllipse(25, 24, 46, 36);
     // 날개 (연한 황갈색)
     mothg.fillStyle(0xd4bc8a, 0.92);
     mothg.fillTriangle(25, 26,  1,  6,  1, 42);   // 왼쪽 날개
@@ -1272,10 +1280,14 @@ function preload() {
 
     // 부유 생물체 (원거리 보상 — 젤리피시 형태)
     const floatG = this.make.graphics({ add: false });
-    floatG.fillStyle(0xbb44ff, 0.22).fillEllipse(25, 20, 46, 36);  // 후광
+    // 후광 — 강한 보라 외곽 글로우 (부유체 강조)
+    floatG.fillStyle(0xee99ff, 0.22).fillEllipse(25, 20, 48, 38);
+    floatG.fillStyle(0xbb44ff, 0.32).fillEllipse(25, 20, 40, 32);
     floatG.fillStyle(0x9922dd, 0.82).fillEllipse(25, 18, 30, 22);  // 본체 돔
     floatG.fillStyle(0xdd88ff, 0.55).fillEllipse(25, 15, 18, 13);  // 내부
     floatG.fillStyle(0xffffff, 0.88).fillCircle(25, 12, 4);        // 발광 코어
+    // ⭐ 림 라이트 — 본체 돔에 밝은 외곽선
+    floatG.lineStyle(1.5, 0xffccff, 0.95).strokeEllipse(25, 18, 30, 22);
     floatG.lineStyle(1.5, 0xcc66ff, 0.65);                         // 촉수
     floatG.lineBetween(17, 28, 13, 45);
     floatG.lineBetween(20, 29, 17, 47);
@@ -1287,6 +1299,8 @@ function preload() {
 
     // 독수리 (고도 4 강적 — HP 2, 큰 날개)
     const eg = this.make.graphics({ add: false });
+    // 후광 (불타는 주황빛 — 강적 위협감)
+    eg.fillStyle(0xff9944, 0.18).fillEllipse(25, 26, 50, 44);
     eg.fillStyle(0x1a1200, 1);
     eg.fillTriangle(25, 27,  0,  6,  8, 44);   // 왼쪽 날개
     eg.fillTriangle(25, 27, 50,  6, 42, 44);   // 오른쪽 날개
@@ -1303,6 +1317,9 @@ function preload() {
 
     // 고공 오염체 — 촉수형 (70×70, HP 3)
     const tng = this.make.graphics({ add: false });
+    // 후광 (강한 보라 외부 글로우 — 부유체 강조)
+    tng.fillStyle(0xcc66ff, 0.22).fillEllipse(35, 50, 68, 48);
+    tng.fillStyle(0x7733cc, 0.32).fillEllipse(35, 50, 60, 42);
     // 몸통 외곽 글로우 (어두운 보라)
     tng.fillStyle(0x1a0d2e, 0.45).fillEllipse(35, 50, 64, 42);
     // 촉수 7개 — 몸통보다 먼저 그려서 몸통이 위에 덮임
@@ -1328,11 +1345,16 @@ function preload() {
     tng.fillStyle(0xaa0000, 1).fillCircle(27, 50, 4.5).fillCircle(43, 50, 4.5);
     tng.fillStyle(0xff3333, 1).fillCircle(27, 50, 2.5).fillCircle(43, 50, 2.5);
     tng.fillStyle(0xff9999, 1).fillCircle(27, 49, 1).fillCircle(43, 49, 1);
+    // ⭐ 림 라이트 — 몸통에 밝은 보라 외곽선
+    tng.lineStyle(1.5, 0xcc88ff, 0.85).strokeEllipse(35, 50, 50, 30);
     tng.generateTexture('tendril', 70, 70);
     tng.destroy();
 
     // 부유 오염 기지 — 오버로드형 (90×90, HP 5, 고정 부유)
     const ovg = this.make.graphics({ add: false });
+    // 후광 (강한 올리브-녹색 외부 글로우 — 부유체 강조)
+    ovg.fillStyle(0xaaff66, 0.22).fillEllipse(45, 44, 90, 72);
+    ovg.fillStyle(0x66cc22, 0.32).fillEllipse(45, 44, 82, 64);
     // 외곽 글로우 (어두운 올리브)
     ovg.fillStyle(0x0e1a06, 0.28).fillEllipse(45, 44, 86, 66);
     // 상단 혹 4개 (등 돌기 — 오버로드 특유)
@@ -1365,6 +1387,8 @@ function preload() {
     ovg.fillStyle(0xbb4400, 1).fillEllipse(31, 39, 14, 9).fillEllipse(59, 39, 14, 9);
     ovg.fillStyle(0xff7722, 1).fillEllipse(31, 39, 7, 5).fillEllipse(59, 39, 7, 5);
     ovg.fillStyle(0xffcc88, 0.8).fillCircle(31, 38, 2).fillCircle(59, 38, 2);
+    // ⭐ 림 라이트 — 메인 돔에 밝은 녹색 외곽선
+    ovg.lineStyle(2, 0xaaff66, 0.85).strokeEllipse(45, 43, 72, 54);
     ovg.generateTexture('overlord', 90, 90);
     ovg.destroy();
 
@@ -1401,6 +1425,10 @@ function create() {
     worldBg.fillStyle(0x4a7830, 0.90).fillRect(0,  380,      WORLD_W, 310);   // 산/숲 녹지
     worldBg.fillStyle(0x7a5030, 1   ).fillRect(0,  680,      WORLD_W, 80);    // 흙 표층
     worldBg.fillStyle(0x4a2e18, 1   ).fillRect(0,  760,      WORLD_W, 250);   // 지하
+
+    // ── 채도 다운 오버레이 — 적들이 배경에서 튀어보이도록 ──
+    // 회색-블루 톤 옅게 덮어 전체 채도를 살짝 낮춤
+    worldBg.fillStyle(0x202830, 0.22).fillRect(0, WORLD_TOP, WORLD_W, WORLD_H);
 
     // 원거리 산 능선 — 코사인 다중합성으로 부드러운 곡선 생성
     const mtFar = this.add.graphics().setDepth(-1);
