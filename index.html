@@ -575,7 +575,7 @@ class IntroScene extends Phaser.Scene {
     }
 
     // ── 게임 시작 ────────────────────────────────────────
-    // ── 개발자 모드 패시브 선택 패널 ─────────────────────
+    // ── 개발자 모드 패시브 선택 패널 (2단 레이아웃) ──────
     openDevMode() {
         if (this.devPanel) { this.devPanel.destroy(true); this.devPanel = null; }
         this.modalOpen = true;
@@ -587,81 +587,100 @@ class IntroScene extends Phaser.Scene {
         // 어두운 배경
         panel.add(this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0.88));
 
-        // 제목 + 부제 (한 줄로 압축)
-        panel.add(this.add.text(W / 2, 38, '🛠  DEV MODE  —  강화 직접 설정', {
+        // 제목 + 부제
+        panel.add(this.add.text(W / 2, 30, '🛠  DEV MODE  —  강화 직접 설정', {
             fontFamily: 'Courier New, monospace', fontSize: '20px', color: '#44ff88',
             stroke: '#000', strokeThickness: 3
         }).setOrigin(0.5));
-        panel.add(this.add.text(W / 2, 62, '※ 실제 게임: 기증 후 랜덤 선택', {
+        panel.add(this.add.text(W / 2, 54, '※ 실제 게임: 기증 후 랜덤 선택', {
             fontFamily: 'Arial', fontSize: '10px', color: '#445544'
         }).setOrigin(0.5));
 
-        // 패시브 정의 (name / 최대 스택 / 등급 / 설명)
+        // 패시브 정의
         const DEFS = [
-            { name: '탄성증가',  max: 3, rarity: 'NORMAL', desc: '발사력 ×1.2 (스택당)',         get: () => armMuscleStack,   set: v => { armMuscleStack  = v; launchMult = BASE_LAUNCH * Math.pow(1.2, v); } },
-            { name: '파워업',  max: 3, rarity: 'NORMAL', desc: '공격력 ×2 (스택당)',            get: () => ironBallStack,    set: v => { ironBallStack   = v; } },
-            { name: '돌을 줍다', max: 3, rarity: 'NORMAL', desc: '즉시 +2 돌멩이 (1회성)',       get: () => pickupStoneStack, set: v => { pickupStoneStack = v; } },
-            { name: '큰돌',   max: 3, rarity: 'RARE',   desc: '크기 ×2 + 공격력 ×2 (스택당)',  get: () => bigStoneStack,    set: v => { bigStoneStack   = v; } },
-            { name: '조준선', max: 2, rarity: 'RARE',   desc: '궤적 표시 (2=100%)',            get: () => aimLineStack,    set: v => { aimLineStack    = v; } },
-            { name: '농구공', max: 2, rarity: 'RARE',   desc: '1스택=1바운드 / 2=2바운드',     get: () => basketballStack, set: v => { basketballStack = v; } },
-            { name: '자석탄', max: 1, rarity: 'RARE',   desc: '정점에서 가장 가까운 적으로 유도', get: () => magnetStack,     set: v => { magnetStack     = v; } },
-            { name: '관통',   max: 1, rarity: 'EPIC',   desc: '무한 관통 (1스택)',             get: () => piercingStack,   set: v => { piercingStack   = v; } },
-            { name: '산탄',   max: 1, rarity: 'EPIC',   desc: '3방향 동시 발사 (±20°)',        get: () => shotgunStack,    set: v => { shotgunStack    = v; } },
-            { name: '폭발',   max: 1, rarity: 'EPIC',   desc: '명중 시 반경 130px 폭발',       get: () => explosionStack,  set: v => { explosionStack  = v; } },
-            { name: '번개탄',    max: 1, rarity: 'EPIC',   desc: '0.5초마다 반경 160px 번개 공격',       get: () => lightningStack,    set: v => { lightningStack    = v; } },
-            { name: '체세포분열', max: 1, rarity: 'EPIC',   desc: '명중 시 2개로 분열 / 재귀 분열 최대 3세대', get: () => cellDivisionStack, set: v => { cellDivisionStack = v; } },
+            { name: '탄성증가',   max: 3, rarity: 'NORMAL', desc: '발사력 ×1.2 (스택당)',            get: () => armMuscleStack,    set: v => { armMuscleStack  = v; launchMult = BASE_LAUNCH * Math.pow(1.2, v); } },
+            { name: '파워업',     max: 3, rarity: 'NORMAL', desc: '공격력 ×2 (스택당)',              get: () => ironBallStack,     set: v => { ironBallStack   = v; } },
+            { name: '돌을 줍다',  max: 3, rarity: 'NORMAL', desc: '즉시 +2 돌멩이 (1회성)',          get: () => pickupStoneStack,  set: v => { pickupStoneStack = v; } },
+            { name: '큰돌',      max: 3, rarity: 'RARE',   desc: '크기 ×2 + 공격력 ×2 (스택당)',   get: () => bigStoneStack,     set: v => { bigStoneStack   = v; } },
+            { name: '조준선',    max: 2, rarity: 'RARE',   desc: '궤적 표시 (2=100%)',             get: () => aimLineStack,     set: v => { aimLineStack    = v; } },
+            { name: '농구공',    max: 2, rarity: 'RARE',   desc: '1스택=1바운드 / 2=2바운드',      get: () => basketballStack,  set: v => { basketballStack = v; } },
+            { name: '자석탄',    max: 1, rarity: 'RARE',   desc: '정점에서 가장 가까운 적으로 유도', get: () => magnetStack,      set: v => { magnetStack     = v; } },
+            { name: '관통',      max: 1, rarity: 'EPIC',   desc: '무한 관통 (1스택)',              get: () => piercingStack,    set: v => { piercingStack   = v; } },
+            { name: '산탄',      max: 1, rarity: 'EPIC',   desc: '3방향 동시 발사 (±20°)',         get: () => shotgunStack,     set: v => { shotgunStack    = v; } },
+            { name: '폭발',      max: 1, rarity: 'EPIC',   desc: '명중 시 반경 130px 폭발',        get: () => explosionStack,   set: v => { explosionStack  = v; } },
+            { name: '번개탄',    max: 1, rarity: 'EPIC',   desc: '0.5초마다 반경 160px 번개 공격', get: () => lightningStack,   set: v => { lightningStack  = v; } },
+            { name: '체세포분열', max: 1, rarity: 'EPIC',   desc: '명중 시 2분열 / 재귀 최대 3세대', get: () => cellDivisionStack, set: v => { cellDivisionStack = v; } },
         ];
 
         const rarityColor = { NORMAL: '#aaaaaa', RARE: '#44bbff', EPIC: '#aa44ff' };
-        const rowY0 = 110;   // 압축: 150 → 110
-        const rowH  = 56;    // 압축: 74 → 56
-        const lblX  = 260, stackX = 640, btnW = 34;
 
-        // 컬럼 헤더
-        panel.add(this.add.text(lblX,      rowY0 - 22, '강화', { fontFamily: 'Arial', fontSize: '11px', color: '#555' }).setOrigin(0, 0.5));
-        panel.add(this.add.text(stackX,    rowY0 - 22, '스택',   { fontFamily: 'Arial', fontSize: '11px', color: '#555' }).setOrigin(0.5, 0.5));
-        panel.add(this.add.text(lblX + 30, rowY0 - 22, '설명',   { fontFamily: 'Arial', fontSize: '11px', color: '#555' }).setOrigin(0, 0.5));
+        // ── 2단 레이아웃 ──────────────────────────────────
+        const ROWS     = 6;          // 열당 행 수 (12 ÷ 2)
+        const rowY0    = 92;         // 첫 행 y
+        const rowH     = 96;         // 행 높이
+        const COL_X    = [28, 648];  // 각 열의 x 기준점
+        const BADGE_DX = 50;         // 뱃지 중심
+        const NAME_DX  = 86;         // 이름·설명 왼쪽 정렬 기준
+        const MINUS_DX = 430;        // [-] 버튼
+        const STACK_DX = 490;        // 스택 숫자
+        const PLUS_DX  = 550;        // [+] 버튼
 
-        // 구분선
-        const div = this.add.graphics();
-        div.lineStyle(1, 0x334433, 0.7).lineBetween(190, rowY0 - 11, 1090, rowY0 - 11);
-        panel.add(div);
+        // 열 구분 세로선
+        const sepG = this.add.graphics();
+        sepG.lineStyle(1, 0x334433, 0.9)
+            .lineBetween(637, 66, 637, rowY0 + ROWS * rowH + 4);
+        panel.add(sepG);
+
+        // 각 열 헤더 + 가로 구분선
+        COL_X.forEach(cx => {
+            panel.add(this.add.text(cx + NAME_DX,  rowY0 - 16, '강화',
+                { fontFamily: 'Arial', fontSize: '11px', color: '#555' }).setOrigin(0, 0.5));
+            panel.add(this.add.text(cx + STACK_DX, rowY0 - 16, '스택',
+                { fontFamily: 'Arial', fontSize: '11px', color: '#555' }).setOrigin(0.5, 0.5));
+            const hDiv = this.add.graphics();
+            hDiv.lineStyle(1, 0x334433, 0.7)
+                .lineBetween(cx + 18, rowY0 - 6, cx + PLUS_DX + 34, rowY0 - 6);
+            panel.add(hDiv);
+        });
 
         const stackTexts = [];
 
         DEFS.forEach((def, i) => {
-            const cy = rowY0 + i * rowH;
+            const colIdx = Math.floor(i / ROWS);   // 0=왼쪽, 1=오른쪽
+            const rowIdx = i % ROWS;
+            const cx  = COL_X[colIdx];
+            const cy  = rowY0 + rowIdx * rowH;
             const col = rarityColor[def.rarity];
 
             // 등급 뱃지
-            panel.add(this.add.text(210, cy, def.rarity, {
+            panel.add(this.add.text(cx + BADGE_DX, cy, def.rarity, {
                 fontFamily: 'Arial', fontSize: '10px', color: '#000',
                 backgroundColor: col, padding: { x: 5, y: 2 }
             }).setOrigin(0.5));
 
-            // 패시브 이름
-            panel.add(this.add.text(lblX, cy, def.name, {
-                fontFamily: '"Arial Black", Arial', fontSize: '18px', color: col
+            // 패시브 이름 (뱃지 오른쪽, 약간 위)
+            panel.add(this.add.text(cx + NAME_DX, cy - 9, def.name, {
+                fontFamily: '"Arial Black", Arial', fontSize: '17px', color: col
             }).setOrigin(0, 0.5));
 
-            // 설명
-            panel.add(this.add.text(lblX + 110, cy + 9, def.desc, {
-                fontFamily: 'Arial', fontSize: '11px', color: '#777'
+            // 설명 (이름 바로 아래, 작은 폰트)
+            panel.add(this.add.text(cx + NAME_DX, cy + 13, def.desc, {
+                fontFamily: 'Arial', fontSize: '10px', color: '#777'
             }).setOrigin(0, 0.5));
 
-            // ─ 버튼
-            const minusBtn = this.add.text(stackX - btnW - 18, cy, '[ - ]', {
+            // [-] 버튼
+            const minusBtn = this.add.text(cx + MINUS_DX, cy, '[ - ]', {
                 fontFamily: 'Courier New', fontSize: '16px', color: '#ff6666'
             }).setOrigin(0.5).setInteractive({ useHandCursor: true });
 
             // 스택 숫자
-            const stackTxt = this.add.text(stackX, cy, `${def.get()} / ${def.max}`, {
+            const stackTxt = this.add.text(cx + STACK_DX, cy, `${def.get()} / ${def.max}`, {
                 fontFamily: '"Arial Black", Arial', fontSize: '18px', color: '#ffffff'
             }).setOrigin(0.5);
             stackTexts.push(stackTxt);
 
-            // + 버튼
-            const plusBtn = this.add.text(stackX + btnW + 18, cy, '[ + ]', {
+            // [+] 버튼
+            const plusBtn = this.add.text(cx + PLUS_DX, cy, '[ + ]', {
                 fontFamily: 'Courier New', fontSize: '16px', color: '#44ff88'
             }).setOrigin(0.5).setInteractive({ useHandCursor: true });
 
