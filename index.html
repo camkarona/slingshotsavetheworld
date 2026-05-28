@@ -239,7 +239,7 @@ let _kickerTween       = null;
 let _kickChargeStart   = 0;     // 똥볼 차징 시작 시각 (ms)
 const KICK_CHARGE_MAX  = 1500;  // 최대 차징 시간 (ms) — 이때 최대 강도
 const KICK_SPEED_MIN   = 450;
-const KICK_SPEED_MAX   = 1750;
+const KICK_SPEED_MAX   = 1400;  // 풀파워 (1750 → 1400, -20% 밸런스 조정)
 let uiKickChargeBar    = null;
 let twinStack          = 0;  // 분신 (RARE): 쌍둥이 새총 동시 발사
 let _slingTilt         = 0;  // 슬링샷 현재 틸트 각도 (radian, 드래그/발사 애니용)
@@ -526,7 +526,7 @@ class IntroScene extends Phaser.Scene {
 
         // ── 메뉴 버튼 ───────────────────────────────────
         const menuDefs = [
-            { label: 'GAME  START', y: 348, size: '40px', col: '#39ff14', hover: '#aaff44', cb: () => this.startGame()           },
+            { label: 'GAME  START', y: 348, size: '40px', col: '#39ff14', hover: '#aaff44', cb: () => { resetAllPassives(); this.startGame(); } },
             { label: '순 위  보 기', y: 416, size: '27px', col: '#e8a030', hover: '#ffdd66', cb: () => this.openRanking()         },
             { label: 'SETTING',     y: 474, size: '27px', col: '#888888', hover: '#eeeeee', cb: () => this.openModal('setting')  },
             { label: 'CREDIT',      y: 528, size: '27px', col: '#888888', hover: '#eeeeee', cb: () => this.openModal('credit')   },
@@ -1941,6 +1941,22 @@ function spawnBird(scene, withFade = false, fixedX = null, forcedType = null) {
 
 // 패시브가 현재 활성 상태인지 (보유 + 토글 ON)
 function isOn(name) { return passiveActive[name] !== false; }
+
+// ─── 모든 패시브 스택 초기화 (새 게임 시작 시) ──────────
+// DEV MODE 시작 경로에서는 호출되지 않음 (DEV MODE 가 설정한 스택을 보존하기 위해)
+function resetAllPassives() {
+    armMuscleStack   = 0; bigStoneStack   = 0; ironBallStack    = 0;
+    aimLineStack     = 0; piercingStack   = 0; basketballStack  = 0;
+    shotgunStack     = 0; magnetStack     = 0; explosionStack   = 0;
+    pickupStoneStack = 0; lightningStack  = 0; cellDivisionStack = 0;
+    groundZeroStack  = 0; recycleStack    = 0; scrapCollectStack = 0;
+    gravityIgnoreStack = 0; burstLoadStack = 0; nukeStack       = 0;
+    slingModStack    = 0; timeStopStack   = 0; twinStack         = 0;
+    dispatchStack    = 0; pendingDispatchX = null;
+    dungBallStack    = 0; dimensionRiftStack = 0;
+    launchMult       = BASE_LAUNCH;
+    Object.keys(passiveActive).forEach(k => delete passiveActive[k]);
+}
 
 // ─── 높이개조 (NORMAL): 새총 높이 동적 조절 ──────────────
 function getSlingRaise() {
