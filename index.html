@@ -2742,18 +2742,20 @@ function doDragAt(px, py) {
             ? BASE_LAUNCH * Math.pow(1.2, armMuscleStack) : BASE_LAUNCH;
         const vx  = Math.cos(angle) * dist * effMult;
         const vy  = Math.sin(angle) * dist * effMult;
-        const g   = config.physics.arcade.gravity.y;
+        // 중력무시 패시브 활성 시 g=0 → 직선 궤적 예측
+        const noGravity = gravityIgnoreStack > 0 && isOn('중력무시');
+        const g   = noGravity ? 0 : config.physics.arcade.gravity.y;
         const cam = sceneRef.cameras.main;
         const visR = cam.scrollX + config.width  / cam.zoom;
         const visB = cam.scrollY + config.height / cam.zoom;
 
-        // 1패스: 화면 내 전체 궤적 점 수집
+        // 1패스: 화면 내 전체 궤적 점 수집 (중력무시면 직선)
         const allDots = [];
         for (let i = 0; i < 80; i++) {
             const t  = i * 0.05;
-            const tx = SLING_CENTER.x + vx * t;
-            const ty = SLING_CENTER.y + vy * t + 0.5 * g * t * t;
-            if (tx > visR || tx < cam.scrollX || ty > visB) break;
+            const tx = origin.x + vx * t;
+            const ty = origin.y + vy * t + 0.5 * g * t * t;
+            if (tx > visR || tx < cam.scrollX || ty > visB || ty < cam.scrollY - 200) break;
             allDots.push({ tx, ty });
         }
 
@@ -3228,11 +3230,12 @@ function annihilateAllEnemies(scene, originX, originY) {
     });
 }
 
-// ─── 차원균열 (LEGENDARY): ±500 다이아몬드 영역 색상 반전 + 적 즉사 ──
+// ─── 차원균열 (LEGENDARY): 화면 전체 색상 반전 + 블랙홀 다이아 ──
 function spawnDimensionalRift(scene, x, y) {
     if (!scene) return;
     const RIFT_HALF = 500;
     const cam = scene.cameras.main;
+    const camW = config.width, camH = config.height;
 
     // 다이아 꼭지점 (top, right, bottom, left) — 상대 좌표
     const pts = [
@@ -3241,105 +3244,129 @@ function spawnDimensionalRift(scene, x, y) {
         { x: 0, y: RIFT_HALF },
         { x: -RIFT_HALF, y: 0 },
     ];
-    const drawDiamond = (g) => {
+    const drawDiamond = (g, scale = 1) => {
         g.beginPath();
-        g.moveTo(pts[0].x, pts[0].y);
-        g.lineTo(pts[1].x, pts[1].y);
-        g.lineTo(pts[2].x, pts[2].y);
-        g.lineTo(pts[3].x, pts[3].y);
+        g.moveTo(pts[0].x * scale, pts[0].y * scale);
+        g.lineTo(pts[1].x * scale, pts[1].y * scale);
+        g.lineTo(pts[2].x * scale, pts[2].y * scale);
+        g.lineTo(pts[3].x * scale, pts[3].y * scale);
         g.closePath();
     };
 
-    // ── 1. 색상 반전 다이아몬드 (DIFFERENCE 블렌드 — 흰색으로 칠하면 아래 색이 반전됨) ──
-    const invertLayer = scene.add.graphics().setDepth(18).setPosition(x, y);
-    invertLayer.fillStyle(0xffffff, 1);
-    drawDiamond(invertLayer);
-    invertLayer.fillPath();
-    invertLayer.setBlendMode(Phaser.BlendModes.DIFFERENCE);
+    // ══════ 1. 화면 전체 색상 반전 (DIFFERENCE blend + 흰색 fullscreen rect) ══════
+    // 흰색을 DIFFERENCE 블렌드로 그리면 아래의 모든 색이 반전됨 (white = 1, 1-color = invert)
+    const invertOverlay = scene.add.graphics().setDepth(26).setScrollFactor(0);
+    invertOverlay.fillStyle(0xffffff, 1).fillRect(0, 0, camW, camH);
+    invertOverlay.setBlendMode(Phaser.BlendModes.DIFFERENCE);
+    invertOverlay.setAlpha(0);
+    // Fade-in 빠르게, hold, fade-out
+    scene.tweens.add({ targets: invertOverlay, alpha: 1, duration: 180, ease: 'Quad.Out' });
+    scene.tweens.add({ targets: invertOverlay, alpha: 0, duration: 600, delay: 1200,
+        ease: 'Quad.In',
+        onComplete: () => invertOverlay.destroy() });
+    // 색상 반전 깜빡임 (불안정한 차원 느낌) — fade-out 시작 전까지만
+    scene.tweens.add({ targets: invertOverlay, alpha: 0.4,
+        duration: 140, delay: 300,
+        yoyo: true, repeat: 2, ease: 'Sine.InOut' });
 
-    // ── 2. 외곽선 (마젠타·시안 2겹 — 차원감) ──
-    const outline1 = scene.add.graphics().setDepth(19).setPosition(x, y);
-    outline1.lineStyle(7, 0xff00ff, 1);
-    drawDiamond(outline1);
-    outline1.strokePath();
-    const outline2 = scene.add.graphics().setDepth(20).setPosition(x, y);
-    outline2.lineStyle(3, 0x00ffff, 1);
-    drawDiamond(outline2);
-    outline2.strokePath();
+    // ══════ 2. 블랙홀 다이아 (월드 좌표 — 공 주변) ══════
+    // 외곽 보라 글로우 후광 (큰 원형 페이드)
+    const glow = scene.add.graphics().setDepth(27).setPosition(x, y);
+    glow.fillStyle(0x4400aa, 0.5);
+    drawDiamond(glow, 1.15);
+    glow.fillPath();
 
-    // ── 3. 등장 애니메이션 (확대 + 페이드 인) ──
-    [invertLayer, outline1, outline2].forEach(g => { g.setScale(0).setAlpha(0); });
+    // 메인 다이아 본체 — 깊은 보라/검정 (블랙홀 사건 지평선)
+    const diamond = scene.add.graphics().setDepth(28).setPosition(x, y);
+    // 가장 어두운 외곽층
+    diamond.fillStyle(0x1a0825, 1);
+    drawDiamond(diamond, 1.0);
+    diamond.fillPath();
+    // 중간층 (살짝 보라)
+    diamond.fillStyle(0x0a0014, 1);
+    drawDiamond(diamond, 0.75);
+    diamond.fillPath();
+    // 핵 (완전한 검정 — 사건 지평선)
+    diamond.fillStyle(0x000000, 1);
+    drawDiamond(diamond, 0.45);
+    diamond.fillPath();
+    // 중심 작은 보라 점 (특이점 — 빛이 휘어 나오는 모습)
+    diamond.fillStyle(0x6633ff, 0.85);
+    drawDiamond(diamond, 0.12);
+    diamond.fillPath();
+    diamond.fillStyle(0xffffff, 0.9).fillCircle(0, 0, 4);  // pinpoint singularity
+
+    // 외곽선 — 두 겹 (보라 + 시안 차원 빛)
+    const outline = scene.add.graphics().setDepth(29).setPosition(x, y);
+    outline.lineStyle(7, 0x9933ff, 1);
+    drawDiamond(outline, 1.0); outline.strokePath();
+    outline.lineStyle(3, 0x44ddff, 0.95);
+    drawDiamond(outline, 1.0); outline.strokePath();
+
+    // 등장 애니메이션 (Back.Out 으로 살짝 튕김)
+    [glow, diamond, outline].forEach(g => { g.setScale(0).setAlpha(0); });
     scene.tweens.add({
-        targets: [invertLayer, outline1, outline2],
+        targets: [glow, diamond, outline],
         scaleX: 1, scaleY: 1, alpha: 1,
-        duration: 300, ease: 'Back.Out'
+        duration: 320, ease: 'Back.Out'
+    });
+    // 외곽 글로우는 살짝 더 크게 진동
+    scene.tweens.add({
+        targets: glow,
+        scaleX: 1.08, scaleY: 1.08, alpha: 0.7,
+        duration: 360, delay: 320,
+        yoyo: true, repeat: 2, ease: 'Sine.InOut'
+    });
+    // 본체 회전 (블랙홀 회전 느낌)
+    scene.tweens.add({
+        targets: [diamond, outline],
+        angle: 90,
+        duration: 1400, delay: 200,
+        ease: 'Cubic.InOut'
     });
 
-    // ── 4. 펄스 — 외곽선 살짝 스케일 진동 ──
+    // 페이드 아웃
     scene.tweens.add({
-        targets: [outline1, outline2],
-        scaleX: 1.06, scaleY: 1.06,
-        duration: 320, delay: 320,
-        yoyo: true, repeat: 2,
-        ease: 'Sine.InOut'
-    });
-
-    // ── 5. 색상 반전 깜빡임 — 차원 불안정 ──
-    scene.tweens.add({
-        targets: invertLayer,
-        alpha: 0.4,
-        duration: 180, delay: 320,
-        yoyo: true, repeat: 5,
-        ease: 'Sine.InOut'
-    });
-
-    // ── 6. 페이드 아웃 + 폭발적 확장 ──
-    scene.tweens.add({
-        targets: [invertLayer, outline1, outline2],
-        scaleX: 1.4, scaleY: 1.4, alpha: 0,
-        duration: 700, delay: 1300,
-        ease: 'Cubic.Out',
+        targets: [glow, diamond, outline],
+        scaleX: 0.6, scaleY: 0.6, alpha: 0,
+        duration: 600, delay: 1300,
+        ease: 'Cubic.In',
         onComplete: () => {
-            invertLayer.destroy();
-            outline1.destroy();
-            outline2.destroy();
+            glow.destroy(); diamond.destroy(); outline.destroy();
         }
     });
 
-    // ── 7. 차원 파편 (스파클) — 다이아몬드 내부 무작위 위치 ──
-    for (let i = 0; i < 30; i++) {
-        let dx = (Math.random() * 2 - 1) * RIFT_HALF;
-        let dy = (Math.random() * 2 - 1) * RIFT_HALF;
-        const sum = Math.abs(dx) + Math.abs(dy);
-        if (sum > RIFT_HALF * 0.9) {
-            const scale = (RIFT_HALF * 0.9) / sum;
-            dx *= scale; dy *= scale;
-        }
-        const sx = x + dx, sy = y + dy;
-        const col = Math.random() < 0.5 ? 0xff44ff : 0x44ffff;
-        const sparkle = scene.add.graphics().setDepth(21).setPosition(sx, sy);
+    // ══════ 3. 차원 파편 (스파클) — 다이아 안에서 끌려들어가는 듯한 입자 ══════
+    for (let i = 0; i < 40; i++) {
+        // 가장자리 무작위 출발 → 중심으로 빨려들어감 (블랙홀 흡수)
+        const ang = Math.random() * Math.PI * 2;
+        const startDist = RIFT_HALF * (0.6 + Math.random() * 0.35);
+        const sx = x + Math.cos(ang) * startDist * 0.8;   // 다이아 형태로 클램프
+        const sy = y + Math.sin(ang) * startDist * 0.6;
+        const col = Math.random() < 0.5 ? 0xaa44ff : 0x44ddff;
+        const sparkle = scene.add.graphics().setDepth(30).setPosition(sx, sy);
         sparkle.fillStyle(col, 1).fillRect(-3, -3, 6, 6);
         scene.tweens.add({
             targets: sparkle,
-            alpha: 0, scaleX: 0.15, scaleY: 0.15,
-            angle: Phaser.Math.Between(180, 360),
-            y: sy - 50 - Math.random() * 60,
-            duration: 900 + Math.random() * 600,
-            delay: Math.random() * 500,
-            ease: 'Quad.Out',
+            x: x, y: y,   // 중심으로 빨려들어감
+            alpha: 0, scaleX: 0.1, scaleY: 0.1,
+            angle: Phaser.Math.Between(360, 720),
+            duration: 700 + Math.random() * 500,
+            delay: 200 + Math.random() * 600,
+            ease: 'Cubic.In',
             onComplete: () => sparkle.destroy()
         });
     }
 
-    // ── 8. 카메라 효과 ──
-    cam.shake(800, 0.022);
-    cam.flash(200, 200, 100, 255);   // 보라빛 잔상
+    // ══════ 4. 카메라 효과 ══════
+    cam.shake(900, 0.022);
+    cam.flash(180, 100, 30, 200);   // 보라빛 잔상
 
-    // ── 9. 자막 ──
+    // ══════ 5. 자막 ══════
     const subtitle = scene.add.text(640, 240, '◇  차 원 균 열  ◇', {
         fontFamily: '"Arial Black", Arial',
         fontSize: '64px',
-        color: '#ff44ff',
+        color: '#cc66ff',
         stroke: '#001144',
         strokeThickness: 9,
     }).setOrigin(0.5).setScrollFactor(0).setDepth(31);
@@ -3348,7 +3375,7 @@ function spawnDimensionalRift(scene, x, y) {
         duration: 340, ease: 'Back.Out' });
     scene.tweens.add({ targets: subtitle, scaleX: 1.0, scaleY: 1.0,
         duration: 200, delay: 380 });
-    // 사이안↔마젠타 색상 진동
+    // 보라↔시안 색상 진동
     scene.tweens.add({
         targets: subtitle,
         duration: 200, delay: 600,
@@ -3356,7 +3383,7 @@ function spawnDimensionalRift(scene, x, y) {
         ease: 'Linear',
         onUpdate: (tween, target) => {
             const t = tween.progress;
-            target.setColor(t < 0.5 ? '#ff44ff' : '#44ffff');
+            target.setColor(t < 0.5 ? '#cc66ff' : '#44ddff');
         }
     });
     scene.tweens.add({ targets: subtitle, alpha: 0, y: 200,
