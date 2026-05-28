@@ -83,6 +83,7 @@ const PASSIVE_MAX_STACK_OF = {
     '다발장전':     2,  // 0.2초 간격 추가 발사 (1스택 +1, 2스택 +2발)
     '새총개조':     2,  // 새총 높이 +50%/+100%
     '시간정지':     1,  // 발사 후 800ms 동안 모든 적 정지
+    '파견':         1,  // 명중 위치(x축)로 다음 턴 슬링샷 이동
     '분신':         1,  // RARE: 옆에 쌍둥이 새총 — 발사 시 함께 발사
     '핵탄두':       1,  // LEGENDARY: 명중 시 화면 내 모든 적 즉사
 };
@@ -226,6 +227,8 @@ let burstLoadStack     = 0;  // 다발장전 (NORMAL): 0.2s 간격으로 추가 
 let nukeStack          = 0;  // 핵탄두 (LEGENDARY): 명중 즉시 화면 내 모든 적 즉사
 let slingModStack      = 0;  // 새총개조 (NORMAL): 새총 높이 증가 (스택당 +80px)
 let timeStopStack      = 0;  // 시간정지 (NORMAL): 발사 후 모든 적 정지
+let dispatchStack      = 0;  // 파견 (NORMAL): 명중 위치(x)로 다음 턴 슬링샷 이동
+let pendingDispatchX   = null;  // 파견 대기 위치 — wipeReturn 시 적용
 let twinStack          = 0;  // 분신 (RARE): 쌍둥이 새총 동시 발사
 let _slingTilt         = 0;  // 슬링샷 현재 틸트 각도 (radian, 드래그/발사 애니용)
 let _tiltTween         = null;  // 슬링샷 틸트 트윈 (boing 효과)
@@ -629,9 +632,9 @@ class IntroScene extends Phaser.Scene {
             fontFamily: 'Arial', fontSize: '10px', color: '#445544'
         }).setOrigin(0.5));
 
-        // 패시브 정의 (티어별 4컬럼 — NORMAL 9 / RARE 7 / EPIC 4 / LEGENDARY 1 = 21개)
+        // 패시브 정의 (티어별 4컬럼 — NORMAL 10 / RARE 7 / EPIC 4 / LEGENDARY 1 = 22개)
         const DEFS = [
-            // ── NORMAL (좌측 컬럼, 9개) ─────────────────────────
+            // ── NORMAL (좌측 컬럼, 10개) ─────────────────────────
             { name: '탄성증가',    max: 3, rarity: 'NORMAL', get: () => armMuscleStack,     set: v => { armMuscleStack  = v; launchMult = BASE_LAUNCH * Math.pow(1.2, v); } },
             { name: '파워업',      max: 3, rarity: 'NORMAL', get: () => ironBallStack,      set: v => { ironBallStack   = v; } },
             { name: '돌을 줍다',   max: 3, rarity: 'NORMAL', get: () => pickupStoneStack,   set: v => { pickupStoneStack = v; } },
@@ -641,6 +644,7 @@ class IntroScene extends Phaser.Scene {
             { name: '다발장전',    max: 2, rarity: 'NORMAL', get: () => burstLoadStack,     set: v => { burstLoadStack     = v; } },
             { name: '새총개조',    max: 2, rarity: 'NORMAL', get: () => slingModStack,      set: v => { slingModStack      = v; applySlingHeight(); } },
             { name: '시간정지',    max: 1, rarity: 'NORMAL', get: () => timeStopStack,      set: v => { timeStopStack      = v; } },
+            { name: '파견',        max: 1, rarity: 'NORMAL', get: () => dispatchStack,      set: v => { dispatchStack      = v; } },
             // ── RARE (중앙 컬럼, 7개) ───────────────────────────
             { name: '큰돌',        max: 3, rarity: 'RARE',   get: () => bigStoneStack,      set: v => { bigStoneStack   = v; } },
             { name: '조준선',      max: 2, rarity: 'RARE',   get: () => aimLineStack,       set: v => { aimLineStack    = v; } },
@@ -661,16 +665,16 @@ class IntroScene extends Phaser.Scene {
         const rarityColor    = { NORMAL: '#aaaaaa', RARE: '#44bbff', EPIC: '#aa44ff', LEGENDARY: '#ffaa00' };
         const rarityBgHex    = { NORMAL: 0x1a1a1a, RARE: 0x0a1e2c, EPIC: 0x1e0a2c, LEGENDARY: 0x3a2400 };
 
-        // ── 4컬럼 티어별 레이아웃 (총 21항목) ─────────────
+        // ── 4컬럼 티어별 레이아웃 (총 22항목) ─────────────
         const COL_BOUNDS = [
-            { tier: 'NORMAL',    start:  0, end:  9, x:  14 },  // 9항목
-            { tier: 'RARE',      start:  9, end: 16, x: 326 },  // 7항목
-            { tier: 'EPIC',      start: 16, end: 20, x: 638 },  // 4항목
-            { tier: 'LEGENDARY', start: 20, end: 21, x: 950 },  // 1항목
+            { tier: 'NORMAL',    start:  0, end: 10, x:  14 },  // 10항목
+            { tier: 'RARE',      start: 10, end: 17, x: 326 },  // 7항목
+            { tier: 'EPIC',      start: 17, end: 21, x: 638 },  // 4항목
+            { tier: 'LEGENDARY', start: 21, end: 22, x: 950 },  // 1항목
         ];
 
-        const rowY0    = 102;
-        const rowH     = 62;   // 9행을 위해 더 압축
+        const rowY0    = 100;
+        const rowH     = 56;   // 10행을 위해 더 압축
         const NAME_DX  = 14;
         const MINUS_DX = 175;
         const STACK_DX = 220;
@@ -759,12 +763,12 @@ class IntroScene extends Phaser.Scene {
             this.modalOpen = false;
             // DEV MODE 에서 설정한 패시브들 → 토글 ON으로 초기화
             Object.keys(passiveActive).forEach(k => delete passiveActive[k]);
-            const devNames  = ['탄성증가','파워업','돌을 줍다','재활용','고철수집','중력무시','다발장전','새총개조','시간정지',
+            const devNames  = ['탄성증가','파워업','돌을 줍다','재활용','고철수집','중력무시','다발장전','새총개조','시간정지','파견',
                                '큰돌','조준선','농구공','그라운드 제로','자석탄','폭발','분신',
                                '관통','산탄','번개탄','체세포분열',
                                '핵탄두'];
             const devStacks = [armMuscleStack, ironBallStack, pickupStoneStack, recycleStack,
-                               scrapCollectStack, gravityIgnoreStack, burstLoadStack, slingModStack, timeStopStack,
+                               scrapCollectStack, gravityIgnoreStack, burstLoadStack, slingModStack, timeStopStack, dispatchStack,
                                bigStoneStack, aimLineStack, basketballStack, groundZeroStack, magnetStack, explosionStack, twinStack,
                                piercingStack, shotgunStack, lightningStack, cellDivisionStack,
                                nukeStack];
@@ -783,7 +787,7 @@ class IntroScene extends Phaser.Scene {
             // 패시브 초기화 (취소 시 원상복구)
             armMuscleStack = 0; bigStoneStack = 0; ironBallStack = 0;
             aimLineStack   = 0; piercingStack = 0; basketballStack = 0;
-            shotgunStack  = 0; magnetStack = 0; explosionStack = 0; pickupStoneStack = 0; lightningStack = 0; cellDivisionStack = 0; groundZeroStack = 0; recycleStack = 0; scrapCollectStack = 0; gravityIgnoreStack = 0; burstLoadStack = 0; nukeStack = 0; slingModStack = 0; timeStopStack = 0; twinStack = 0;
+            shotgunStack  = 0; magnetStack = 0; explosionStack = 0; pickupStoneStack = 0; lightningStack = 0; cellDivisionStack = 0; groundZeroStack = 0; recycleStack = 0; scrapCollectStack = 0; gravityIgnoreStack = 0; burstLoadStack = 0; nukeStack = 0; slingModStack = 0; timeStopStack = 0; twinStack = 0; dispatchStack = 0; pendingDispatchX = null;
             applySlingHeight();
             redrawTwinStand();
             launchMult = BASE_LAUNCH;
@@ -1865,6 +1869,50 @@ function applySlingHeight() {
     }
 }
 
+// ─── 파견 (NORMAL): 명중 위치로 슬링샷 이동 ─────────────
+// hitBird 에서 pendingDispatchX 가 설정되면 wipeReturn 시 적용
+function applyPendingDispatch() {
+    if (pendingDispatchX === null) return;
+    const minX = 220, maxX = WORLD_LIMIT_X - 220;
+    const newX = Phaser.Math.Clamp(pendingDispatchX, minX, maxX);
+    pendingDispatchX = null;
+
+    const dx = newX - SLING_CENTER.x;
+    if (Math.abs(dx) < 0.5) return;   // 사실상 이동 없음
+
+    SLING_CENTER.x += dx;
+    PRONG_L.x      += dx;
+    PRONG_R.x      += dx;
+    redrawSlingStand();
+    redrawTwinStand();
+
+    // 도착 신호 — 새 위치에 작은 dust puff
+    if (sceneRef) {
+        const puff = sceneRef.add.graphics().setDepth(7).setPosition(SLING_CENTER.x, 720);
+        puff.fillStyle(0xe8a030, 0.85).fillCircle(0, 0, 14);
+        sceneRef.tweens.add({ targets: puff,
+            scaleX: 2.6, scaleY: 1.4, alpha: 0,
+            duration: 420, ease: 'Quad.Out',
+            onComplete: () => puff.destroy() });
+
+        // 흙먼지 좌우 분기 (8개)
+        for (let i = 0; i < 8; i++) {
+            const dir = i < 4 ? -1 : 1;
+            const chip = sceneRef.add.rectangle(SLING_CENTER.x, 720,
+                Phaser.Math.Between(3, 5), Phaser.Math.Between(3, 5),
+                Phaser.Utils.Array.GetRandom([0xc8a060, 0xa07840, 0xe0c080])
+            ).setDepth(7).setOrigin(0.5, 1);
+            sceneRef.physics.add.existing(chip);
+            chip.body.setVelocity(dir * Phaser.Math.Between(100, 180),
+                                   Phaser.Math.Between(-220, -80));
+            chip.body.setGravityY(500);
+            sceneRef.tweens.add({ targets: chip, alpha: 0,
+                duration: Phaser.Math.Between(450, 650),
+                onComplete: () => chip.destroy() });
+        }
+    }
+}
+
 // 고철수집 보너스: 적 처치 시 추가로 얻는 특수물질
 // 1스택 = +1, 2스택 = +3
 function getScrapBonus() {
@@ -1892,6 +1940,7 @@ function rebuildPassiveLines(scene) {
                        '다발장전': burstLoadStack,
                        '새총개조': slingModStack,
                        '시간정지': timeStopStack,
+                       '파견':     dispatchStack,
                        '분신':     twinStack,
                        '핵탄두':   nukeStack };
     const owned = Object.keys(STACK_OF).filter(k => STACK_OF[k] > 0);
@@ -1899,7 +1948,7 @@ function rebuildPassiveLines(scene) {
     const PASSIVE_RARITY = {
         '탄성증가': 'NORMAL', '파워업': 'NORMAL', '돌을 줍다':  'NORMAL', '재활용': 'NORMAL',
         '고철수집': 'NORMAL', '중력무시': 'NORMAL', '다발장전': 'NORMAL', '새총개조': 'NORMAL',
-        '시간정지': 'NORMAL',
+        '시간정지': 'NORMAL', '파견': 'NORMAL',
         '큰돌':   'RARE',   '조준선': 'RARE',   '농구공':    'RARE',
         '자석탄': 'RARE',   '그라운드 제로': 'RARE', '폭발':   'RARE', '분신': 'RARE',
         '관통':   'EPIC',   '산탄':   'EPIC',   '번개탄': 'EPIC',
@@ -1946,7 +1995,7 @@ function rebuildPassiveLines(scene) {
         const tierCol  = PANEL_COL[rarity]     ?? '#aaaaaa';
         const stackStr = (name === '관통' || name === '체세포분열' || name === '그라운드 제로'
                           || name === '중력무시' || name === '핵탄두'
-                          || name === '시간정지' || name === '분신')
+                          || name === '시간정지' || name === '분신' || name === '파견')
                          ? '' : ` ×${STACK_OF[name]}`;
         const lineY    = BASE_Y + row * LINE_H;
 
@@ -3329,6 +3378,12 @@ function hitBird(stone, bird) {
     if (stone.hitBirds.has(bird)) return;
     stone.hitBirds.add(bird);
 
+    // ── 파견 (NORMAL): 명중 위치를 다음 턴 슬링샷 위치로 예약 ──
+    // 핵탄두/관통 등 다른 효과보다 먼저 기록 (마지막 명중 위치가 적용됨)
+    if (dispatchStack > 0 && isOn('파견')) {
+        pendingDispatchX = bird.x;
+    }
+
     // ── 핵탄두 (LEGENDARY): 명중 즉시 화면 내 모든 적 즉사 ──
     // 데미지 처리 / 패시브 전부보다 우선 발동 → 돌은 폭발과 함께 소멸
     if (nukeStack > 0 && isOn('핵탄두')) {
@@ -3475,10 +3530,12 @@ function hitBird(stone, bird) {
 function wipeReturn(scene, onComplete) {
     setAimBtnVisible(false);
     const cam = scene.cameras.main;
-    // 카메라가 이미 홈 근처면 암전 없이 즉시 복귀
+    // 파견 대기 중이면 항상 fade 거쳐서 슬링샷 이동을 자연스럽게
+    const hasDispatch = pendingDispatchX !== null;
+    // 카메라가 이미 홈 근처면 암전 없이 즉시 복귀 (단, 파견 대기 없을 때만)
     const homeScrollX = Math.max(0, SLING_CENTER.x - config.width  / (2 * cam.zoom));
     const homeScrollY = CAM_HOME_Y - config.height / (2 * cam.zoom);
-    const nearHome = cam.zoom >= 0.95 &&
+    const nearHome = !hasDispatch && cam.zoom >= 0.95 &&
                      Math.abs(cam.scrollX - homeScrollX) < 200 &&
                      Math.abs(cam.scrollY - homeScrollY) < 200;
     if (nearHome) {
@@ -3490,6 +3547,7 @@ function wipeReturn(scene, onComplete) {
     }
     cam.fadeOut(280, 0, 0, 0);
     cam.once('camerafadeoutcomplete', () => {
+        applyPendingDispatch();   // 파견 패시브: 새 위치로 슬링샷 이동
         cam.stopFollow();
         cam.setZoom(1.0);
         cam.centerOn(SLING_CENTER.x, CAM_HOME_Y);
@@ -3871,6 +3929,7 @@ function showPassiveSelection(scene, donatedAmt = 10) {
         { name: '새총개조',   desc: '새총을 더 크게 개조!\n높이 +50% (2스택 시 2배)',                          color: 0x999999, rarity: 'NORMAL' },
         { name: '새총개조',   desc: '새총을 더 크게 개조!\n높이 +50% (2스택 시 2배)',                          color: 0x999999, rarity: 'NORMAL' },
         { name: '시간정지',   desc: '발사 후 0.8초간\n모든 적의 움직임이 정지!',                                color: 0x999999, rarity: 'NORMAL' },
+        { name: '파견',       desc: '명중 시 다음 턴에\n새총이 그 위치로 이동합니다',                            color: 0x999999, rarity: 'NORMAL' },
         { name: '핵탄두',    desc: '☢ 명중 즉시 화면 내\n모든 적이 즉사합니다!',                            color: 0xffaa00, rarity: 'LEGENDARY' },
         { name: '자석탄',   desc: '포물선 정점에서 가장 가까운 적으로\n궤도를 강제 수정합니다!',           color: 0x44bbff, rarity: 'RARE'   },
         { name: '큰돌',    desc: '돌멩이 크기가 2배가 됩니다.\n공격력도 2배가 됩니다!',                  color: 0x44bbff, rarity: 'RARE'   },
@@ -3902,6 +3961,7 @@ function showPassiveSelection(scene, donatedAmt = 10) {
                              '다발장전': burstLoadStack,
                              '새총개조': slingModStack,
                              '시간정지': timeStopStack,
+                             '파견':   dispatchStack,
                              '분신':   twinStack,
                              '핵탄두': nukeStack }[n] ?? 0);
     const maxStack = n => PASSIVE_MAX_STACK_OF[n] ?? PASSIVE_MAX_STACK;
@@ -4054,6 +4114,9 @@ function applyPassive(scene, passive) {
     } else if (passive.name === '시간정지') {
         if (timeStopStack >= _ms('시간정지')) return;
         timeStopStack++;
+    } else if (passive.name === '파견') {
+        if (dispatchStack >= _ms('파견')) return;
+        dispatchStack++;
     } else if (passive.name === '분신') {
         if (twinStack >= _ms('분신')) return;
         twinStack++;
@@ -4171,8 +4234,15 @@ function restartGame(scene) {
     nukeStack          = 0;
     slingModStack      = 0;
     timeStopStack      = 0;
+    dispatchStack      = 0;
+    pendingDispatchX   = null;
     twinStack          = 0;
-    applySlingHeight();   // 새총 높이 원복
+    // 슬링샷 x 위치 원복 (파견으로 이동된 경우 복귀)
+    const xReset = 320 - SLING_CENTER.x;
+    SLING_CENTER.x += xReset;
+    PRONG_L.x      += xReset;
+    PRONG_R.x      += xReset;
+    applySlingHeight();   // 새총 높이 원복 + redraw
     redrawTwinStand();    // 쌍둥이 새총 숨김
     launchMult     = BASE_LAUNCH;
 
@@ -4369,7 +4439,8 @@ function refreshPlayerPanel(hasPassives) {
                      + pickupStoneStack + lightningStack + cellDivisionStack
                      + groundZeroStack + recycleStack
                      + scrapCollectStack + gravityIgnoreStack + burstLoadStack
-                     + nukeStack + slingModStack + timeStopStack + twinStack) > 0;
+                     + nukeStack + slingModStack + timeStopStack + twinStack
+                     + dispatchStack) > 0;
     }
     const lines = [`STAGE  ${roundNumber}`];
     if (hasPassives) lines.push('', '── 강화 ──');
