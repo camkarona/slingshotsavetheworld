@@ -114,6 +114,8 @@ const TOGGLE_Y      = 8 + PANEL_MIN_H + 18;         // = 406 (미니맵 토글 y
 const MM_X = 8,   MM_Y = TOGGLE_Y + 24;             // 미니맵 좌상단 (= 430)
 const MM_W = 256, MM_H = 158;                       // 미니맵 크기 (원본 158)
 const REMAINING_Y = MM_Y + MM_H + 12;               // 남은 오염 생물 y (= 600)
+const SETTING_BTN_Y = REMAINING_Y + 32;             // 설정 버튼 y
+const HOME_BTN_Y    = SETTING_BTN_Y + 28;           // 처음으로 버튼 y
 const MM_WY0 = -450, MM_WY1 = 800;
 const MM_WX0 = 0,    MM_WX1 = WORLD_LIMIT_X; // WORLD_LIMIT_X 와 동일
 
@@ -299,6 +301,8 @@ let permanentHitAreas = [];
 // 미니맵 토글 상태 / UI 오브젝트
 let minimapVisible  = true;
 let uiMinimapBtnBg  = null, uiMinimapBtnTxt = null;
+let uiSettingBtnBg  = null, uiSettingBtnTxt = null;
+let uiHomeBtnBg     = null, uiHomeBtnTxt    = null;
 
 // ─── 오디오 상태 ──────────────────────────────────────
 let currentBgm      = null;
@@ -488,12 +492,13 @@ class IntroScene extends Phaser.Scene {
 
         // ── 인게임 새들 (5종, 고도별 무작위 비행) ────────────
         this.birds = [];
+        // 텍스처 해상도 2배 반영 — 디스플레이 크기 유지하려면 scale 1/2
         const INTRO_BIRD_DEFS = [
-            { key: 'mothBird',  count: 3, zoneY: [560, 595], speed: [25, 50],   scale: 0.50 },
-            { key: 'droneBird', count: 2, zoneY: [380, 470], speed: [50, 90],   scale: 0.50 },
-            { key: 'mechBird',  count: 3, zoneY: [200, 320], speed: [80, 150],  scale: 0.50 },
-            { key: 'redBird',   count: 2, zoneY: [220, 340], speed: [120, 220], scale: 0.50 },
-            { key: 'eagle',     count: 1, zoneY: [110, 200], speed: [160, 260], scale: 0.72 },
+            { key: 'mothBird',  count: 3, zoneY: [560, 595], speed: [25, 50],   scale: 0.25 },
+            { key: 'droneBird', count: 2, zoneY: [380, 470], speed: [50, 90],   scale: 0.25 },
+            { key: 'mechBird',  count: 3, zoneY: [200, 320], speed: [80, 150],  scale: 0.25 },
+            { key: 'redBird',   count: 2, zoneY: [220, 340], speed: [120, 220], scale: 0.25 },
+            { key: 'eagle',     count: 1, zoneY: [110, 200], speed: [160, 260], scale: 0.36 },
         ];
         INTRO_BIRD_DEFS.forEach(def => {
             for (let i = 0; i < def.count; i++) {
@@ -1230,14 +1235,22 @@ class IntroScene extends Phaser.Scene {
 
 // ─── preload ──────────────────────────────────────────
 function preload() {
-    const sg = this.make.graphics({ add: false });
+    // 텍스처 해상도 2배 — 같은 화면 크기로 표시되지만 디테일 4배 (50×50 → 100×100)
+    const TEX_SCALE = 2;
+    const newGfx = () => {
+        const g = newGfx();
+        g.scaleCanvas(TEX_SCALE, TEX_SCALE);   // 모든 후속 그리기 명령 자동 2x 적용
+        return g;
+    };
+
+    const sg = newGfx();
     sg.fillStyle(0x95a5a6, 1).fillCircle(15, 15, 15);
     sg.fillStyle(0x7f8c8d, 1).fillCircle(10, 10, 8);
-    sg.generateTexture('stone', 30, 30);
+    sg.generateTexture('stone', 30 * TEX_SCALE, 30 * TEX_SCALE);
     sg.destroy();
 
     // 기계 변이 새 — 흰색·회색·검정 + 녹색 눈 (어두운 배경과 강한 대비)
-    const mg = this.make.graphics({ add: false });
+    const mg = newGfx();
     // 후광 — 청록빛 (기계 + 녹색 눈 테마)
     mg.fillStyle(0xaaffcc, 0.22).fillEllipse(25, 25, 48, 36);
     // ── 본체 (밝은 회색) ──
@@ -1259,11 +1272,11 @@ function preload() {
     mg.fillStyle(0x000000, 1).fillCircle(42, 25, 6);     // 검정 베젤
     mg.fillStyle(0x39ff14, 1).fillCircle(42, 25, 4.5);   // 녹색 렌즈
     mg.fillStyle(0xaaffaa, 1).fillCircle(41, 24, 1.6);   // 하이라이트
-    mg.generateTexture('mechBird', 50, 50);
+    mg.generateTexture('mechBird', 50 * TEX_SCALE, 50 * TEX_SCALE);
     mg.destroy();
 
     // 방사능 돌연변이 새 — 뾰족한 날개·부리 (매처럼 날카로운 실루엣)
-    const rg = this.make.graphics({ add: false });
+    const rg = newGfx();
     // ── 후광 (붉은빛 — 위협 강조) ──
     rg.fillStyle(0xff4466, 0.22).fillEllipse(25, 25, 50, 38);
 
@@ -1296,10 +1309,10 @@ function preload() {
     rg.fillStyle(0xff3030, 1).fillCircle(36, 22, 2);
     rg.fillStyle(0xff9090, 1).fillCircle(35, 21, 1);
 
-    rg.generateTexture('redBird', 50, 50);
+    rg.generateTexture('redBird', 50 * TEX_SCALE, 50 * TEX_SCALE);
     rg.destroy();
 
-    const dg = this.make.graphics({ add: false });
+    const dg = newGfx();
     // 후광 (시안빛 — 기계 드론 느낌)
     dg.fillStyle(0x88ddff, 0.18).fillEllipse(25, 25, 44, 44);
     dg.fillStyle(0x445566, 1).fillRect(18, 18, 14, 14);
@@ -1310,11 +1323,11 @@ function preload() {
     dg.fillCircle(6, 6, 6).fillCircle(44, 6, 6);
     dg.fillCircle(6, 44, 6).fillCircle(44, 44, 6);
     dg.fillStyle(0x00ccff, 1).fillCircle(25, 25, 3);
-    dg.generateTexture('droneBird', 50, 50);
+    dg.generateTexture('droneBird', 50 * TEX_SCALE, 50 * TEX_SCALE);
     dg.destroy();
 
     // 나방 (지상 근처 약한 적)
-    const mothg = this.make.graphics({ add: false });
+    const mothg = newGfx();
     // 후광 (따뜻한 크림빛 — 지상 녹색에서 떠보이도록)
     mothg.fillStyle(0xffeecc, 0.18).fillEllipse(25, 24, 46, 36);
     // 날개 (연한 황갈색)
@@ -1333,11 +1346,11 @@ function preload() {
     // 더듬이
     mothg.lineStyle(1, 0x554433, 1);
     mothg.lineBetween(25, 10, 15, 1).lineBetween(25, 10, 35, 1);
-    mothg.generateTexture('mothBird', 50, 50);
+    mothg.generateTexture('mothBird', 50 * TEX_SCALE, 50 * TEX_SCALE);
     mothg.destroy();
 
     // 부유 생물체 (원거리 보상 — 젤리피시 형태)
-    const floatG = this.make.graphics({ add: false });
+    const floatG = newGfx();
     // 후광 — 강한 보라 외곽 글로우 (부유체 강조)
     floatG.fillStyle(0xee99ff, 0.22).fillEllipse(25, 20, 48, 38);
     floatG.fillStyle(0xbb44ff, 0.32).fillEllipse(25, 20, 40, 32);
@@ -1352,11 +1365,11 @@ function preload() {
     floatG.lineBetween(25, 30, 25, 48);
     floatG.lineBetween(30, 29, 33, 47);
     floatG.lineBetween(33, 28, 37, 45);
-    floatG.generateTexture('floater', 50, 50);
+    floatG.generateTexture('floater', 50 * TEX_SCALE, 50 * TEX_SCALE);
     floatG.destroy();
 
     // 독수리 (고도 4 강적 — HP 2, 큰 날개)
-    const eg = this.make.graphics({ add: false });
+    const eg = newGfx();
     // 후광 (불타는 주황빛 — 강적 위협감)
     eg.fillStyle(0xff9944, 0.18).fillEllipse(25, 26, 50, 44);
     eg.fillStyle(0x1a1200, 1);
@@ -1370,11 +1383,11 @@ function preload() {
     eg.fillStyle(0xff2200, 1).fillCircle(25, 14, 4);
     eg.fillStyle(0xffffff, 1).fillCircle(25, 14, 1.5);
     eg.fillStyle(0xe8a800, 1).fillTriangle(23, 13, 27, 13, 25, 5);
-    eg.generateTexture('eagle', 50, 50);
+    eg.generateTexture('eagle', 50 * TEX_SCALE, 50 * TEX_SCALE);
     eg.destroy();
 
     // 고공 오염체 — 촉수형 (70×70, HP 3)
-    const tng = this.make.graphics({ add: false });
+    const tng = newGfx();
     // 후광 (강한 보라 외부 글로우 — 부유체 강조)
     tng.fillStyle(0xcc66ff, 0.22).fillEllipse(35, 50, 68, 48);
     tng.fillStyle(0x7733cc, 0.32).fillEllipse(35, 50, 60, 42);
@@ -1405,11 +1418,11 @@ function preload() {
     tng.fillStyle(0xff9999, 1).fillCircle(27, 49, 1).fillCircle(43, 49, 1);
     // ⭐ 림 라이트 — 몸통에 밝은 보라 외곽선
     tng.lineStyle(1.5, 0xcc88ff, 0.85).strokeEllipse(35, 50, 50, 30);
-    tng.generateTexture('tendril', 70, 70);
+    tng.generateTexture('tendril', 70 * TEX_SCALE, 70 * TEX_SCALE);
     tng.destroy();
 
     // 부유 오염 기지 — 오버로드형 (90×90, HP 5, 고정 부유)
-    const ovg = this.make.graphics({ add: false });
+    const ovg = newGfx();
     // 후광 (강한 올리브-녹색 외부 글로우 — 부유체 강조)
     ovg.fillStyle(0xaaff66, 0.22).fillEllipse(45, 44, 90, 72);
     ovg.fillStyle(0x66cc22, 0.32).fillEllipse(45, 44, 82, 64);
@@ -1447,7 +1460,7 @@ function preload() {
     ovg.fillStyle(0xffcc88, 0.8).fillCircle(31, 38, 2).fillCircle(59, 38, 2);
     // ⭐ 림 라이트 — 메인 돔에 밝은 녹색 외곽선
     ovg.lineStyle(2, 0xaaff66, 0.85).strokeEllipse(45, 43, 72, 54);
-    ovg.generateTexture('overlord', 90, 90);
+    ovg.generateTexture('overlord', 90 * TEX_SCALE, 90 * TEX_SCALE);
     ovg.destroy();
 
 }
@@ -1674,6 +1687,28 @@ function create() {
             uiMinimapBtnTxt.setText(minimapVisible ? '● 미니맵  ON' : '○ 미니맵  OFF');
             uiMinimapBtnTxt.setColor(minimapVisible ? '#e8a030' : '#6a5830');
         }
+    });
+
+    // ─── 설정 버튼 (HUD 좌측 패널 하단) ──────────────────
+    uiSettingBtnBg  = this.add.graphics().setScrollFactor(0).setDepth(9);
+    uiSettingBtnTxt = this.add.text(PANEL_CX, SETTING_BTN_Y, '⚙  설정', {
+        fontFamily: 'Arial Black', fontSize: '14px', color: '#cccccc'
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(9);
+    drawSideBtn(uiSettingBtnBg, SETTING_BTN_Y, 1.0);
+    permanentHitAreas.push({
+        x: PANEL_CX, y: SETTING_BTN_Y, hw: 100, hh: 13,
+        cb: () => openInGameSettings(sceneRef)
+    });
+
+    // ─── 처음으로 버튼 (메인 메뉴로 복귀) ──────────────────
+    uiHomeBtnBg  = this.add.graphics().setScrollFactor(0).setDepth(9);
+    uiHomeBtnTxt = this.add.text(PANEL_CX, HOME_BTN_Y, '🏠  처음으로', {
+        fontFamily: 'Arial Black', fontSize: '14px', color: '#cccccc'
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(9);
+    drawSideBtn(uiHomeBtnBg, HOME_BTN_Y, 1.0);
+    permanentHitAreas.push({
+        x: PANEL_CX, y: HOME_BTN_Y, hw: 100, hh: 13,
+        cb: () => confirmGoToMainMenu(sceneRef)
     });
 
     // 조준화면으로 버튼 (줌 아웃 시 화면 중앙에 표시)
@@ -2092,10 +2127,11 @@ function spawnBird(scene, withFade = false, fixedX = null, forcedType = null) {
     const zoneY = type.zoneY ?? [80, 260];
     const y = Phaser.Math.Between(zoneY[0], zoneY[1]);
     const bird = birds.create(x, y, type.key);
-    bird.setScale(type.key === 'eagle'    ? 0.72
-                : type.key === 'tendril'  ? 1.05
-                : type.key === 'overlord' ? 1.15
-                : 0.5);
+    // 텍스처 해상도 2배 → 같은 표시 크기 유지하려면 스케일 1/2
+    bird.setScale((type.key === 'eagle'    ? 0.72
+                 : type.key === 'tendril'  ? 1.05
+                 : type.key === 'overlord' ? 1.15
+                 : 0.5) / 2);
     bird.body.allowGravity = false;
     bird.materialValue = type.material;
     bird.hp    = type.hp ?? 1;
@@ -2669,7 +2705,8 @@ function rebuildPassiveLines(scene) {
 }
 
 function getStoneScale() {
-    return 0.5 * Math.pow(2, (isOn('큰돌') ? bigStoneStack : 0));
+    // 텍스처 해상도 2배 → 0.5 → 0.25 (디스플레이 크기 동일)
+    return 0.25 * Math.pow(2, (isOn('큰돌') ? bigStoneStack : 0));
 }
 
 // 새들을 x=1000-3200 구역에 균등하게 산포 (스테이지별 수량은 STAGE_DATA 참조)
@@ -2772,6 +2809,11 @@ function compensateHUDZoom() {
     p = f(18,  52); if (uiPanelContent) uiPanelContent.setPosition(p.x, p.y).setFontSize(`${14 / z}px`);
     drawMinimapBtn(z);
     p = f(PANEL_CX, TOGGLE_Y); if (uiMinimapBtnTxt) uiMinimapBtnTxt.setPosition(p.x, p.y).setFontSize(`${18 / z}px`);
+    // 설정 / 처음으로 보조 버튼
+    drawSideBtn(uiSettingBtnBg, SETTING_BTN_Y, z);
+    drawSideBtn(uiHomeBtnBg,    HOME_BTN_Y,    z);
+    p = f(PANEL_CX, SETTING_BTN_Y); if (uiSettingBtnTxt) uiSettingBtnTxt.setPosition(p.x, p.y).setFontSize(`${14 / z}px`);
+    p = f(PANEL_CX, HOME_BTN_Y);    if (uiHomeBtnTxt)    uiHomeBtnTxt.setPosition(p.x, p.y).setFontSize(`${14 / z}px`);
     // 조준화면으로 버튼은 화면 정중앙 → 위치는 불변, 크기만 역보정
     if (uiAimBtn) { uiAimBtn.setScale(1 / z); uiAimBtnTxt.setScale(1 / z); }
     // 패시브 라인 줌 보정 (각 오브젝트에 저장된 _hx, _hy, _fs 사용)
@@ -4266,7 +4308,7 @@ function spawnSplitStones(stone) {
         const ss = activeStones.get(sx, sy, 'stone');
         if (!ss) return;
         ss.setActive(true).setVisible(true).setDepth(1);
-        ss.setScale(0.44 - gen * 0.06);   // 세대가 높을수록 약간 작아짐
+        ss.setScale((0.44 - gen * 0.06) / 2);   // 세대가 높을수록 작아짐 (텍스처 2배 반영)
         const HIT_CAP = 28;
         ss.body.setSize(Math.min(ss.displayWidth, HIT_CAP), Math.min(ss.displayHeight, HIT_CAP));
         ss.body.reset(sx, sy);
@@ -5382,6 +5424,85 @@ function drawMinimapBtn(z) {
     const borCol = minimapVisible ? 0xe8a030 : 0x4a3010;
     uiMinimapBtnBg.fillStyle(bgCol, 0.90).fillRoundedRect(x0, y0, bw, bh, 6 / z);
     uiMinimapBtnBg.lineStyle(1 / z, borCol, 0.75).strokeRoundedRect(x0, y0, bw, bh, 6 / z);
+}
+
+// 사이드 패널 보조 버튼 (설정 / 처음으로) — z 보정 포함 둥근 배경
+function drawSideBtn(g, btnY, z) {
+    if (!g) return;
+    g.clear();
+    const cx = config.width / 2, cy = config.height / 2;
+    const bw = 200 / z, bh = 22 / z;
+    const x0 = cx + (PANEL_CX - cx) / z - bw / 2;
+    const y0 = cy + (btnY     - cy) / z - bh / 2;
+    g.fillStyle(0x100c04, 0.85).fillRoundedRect(x0, y0, bw, bh, 5 / z);
+    g.lineStyle(1 / z, 0x4a3010, 0.7).strokeRoundedRect(x0, y0, bw, bh, 5 / z);
+}
+
+// 게임 내 설정 모달 — 볼륨 컨트롤
+function openInGameSettings(scene) {
+    if (uiOverlay) return;   // 다른 모달이 열려있으면 패스
+    uiOverlay = scene.add.container(0, 0).setDepth(50).setScrollFactor(0);
+    mkRect(scene, uiOverlay, 0, 0, 1280, 720, 0x000000, 0.82);
+    mkPanel(scene, uiOverlay, 380, 230, 520, 280);
+
+    mkText(scene, uiOverlay, 640, 274, '⚙  설정', {
+        fontFamily: 'Arial Black', fontSize: '28px', color: '#e8a030'
+    });
+    mkText(scene, uiOverlay, 640, 316, '게임 중 볼륨 조정', {
+        fontFamily: 'Arial', fontSize: '13px', color: '#888888'
+    });
+
+    // 간단 볼륨 슬라이더 — 5단계 버튼
+    const drawVolBtns = (label, getVal, setVal, baseY) => {
+        mkText(scene, uiOverlay, 460, baseY, label, {
+            fontFamily: 'Arial Black', fontSize: '14px', color: '#cccccc'
+        });
+        [0, 0.25, 0.5, 0.75, 1.0].forEach((v, i) => {
+            const bx = 540 + i * 50;
+            const filled = Math.abs(getVal() - v) < 0.13;
+            const bg = scene.add.rectangle(bx, baseY, 40, 28,
+                filled ? 0xe8a030 : 0x2a1808).setStrokeStyle(1.5, 0xe8a030);
+            const txt = scene.add.text(bx, baseY, `${Math.round(v*100)}%`, {
+                fontFamily: 'Arial', fontSize: '11px',
+                color: filled ? '#000000' : '#e8a030'
+            }).setOrigin(0.5);
+            uiOverlay.add([bg, txt]);
+            overlayHitAreas.push({ x: bx, y: baseY, hw: 22, hh: 16,
+                cb: () => { setVal(v); openInGameSettings(scene); } });
+        });
+    };
+    drawVolBtns('BGM', () => bgmVolume, (v) => {
+        bgmVolume = v;
+        if (currentBgm) currentBgm.volume = v;
+        clearOverlay();
+    }, 372);
+    drawVolBtns('SFX', () => sfxVolume, (v) => {
+        sfxVolume = v;
+        clearOverlay();
+    }, 414);
+
+    mkBtn(scene, uiOverlay, 640, 482, 160, 36, '닫 기', 0x39ff14, '#000000',
+        () => clearOverlay(), 14);
+}
+
+// '처음으로' 확인 다이얼로그 → 메인 메뉴
+function confirmGoToMainMenu(scene) {
+    if (uiOverlay) return;
+    uiOverlay = scene.add.container(0, 0).setDepth(50).setScrollFactor(0);
+    mkRect(scene, uiOverlay, 0, 0, 1280, 720, 0x000000, 0.82);
+    mkPanel(scene, uiOverlay, 410, 250, 460, 210);
+
+    mkText(scene, uiOverlay, 640, 300, '메인 메뉴로 돌아갈까요?', {
+        fontFamily: 'Arial Black', fontSize: '22px', color: '#e8a030'
+    });
+    mkText(scene, uiOverlay, 640, 342, '현재 진행은 저장되지 않습니다.', {
+        fontFamily: 'Arial', fontSize: '13px', color: '#888888'
+    });
+
+    mkBtn(scene, uiOverlay, 540, 408, 150, 42, '취 소', 0x334455, '#cccccc',
+        () => clearOverlay(), 14);
+    mkBtn(scene, uiOverlay, 740, 408, 150, 42, '예 ▶', 0x39ff14, '#000000',
+        () => { clearOverlay(); goToMainMenu(scene); }, 14);
 }
 
 function drawPanelBg(z) {
