@@ -290,6 +290,7 @@ let uiPollutionText = null;
 let uiResearchBtn = null, uiResearchBtnTxt = null;  // 박사님 연구 버튼 (HUD)
 let uiPanelBg = null, uiPanelTitle = null, uiPanelContent = null;
 let uiSkyGradient = null;  // 동적 하늘 그라데이션 (아포칼립스 — 은은하게 색이 흐름)
+let uiClouds      = [];    // 서서히 흐르는 솜사탕 구름 sprite 목록
 let uiSlingStand = null;   // 새총 거치대 그래픽 (높이개조 패시브로 동적 재렌더)
 let uiTwinStand  = null;   // 분신 쌍둥이 새총 그래픽 (분신 패시브 활성화 시만 표시)
 let uiKicker     = null;   // 똥볼 축구선수 그래픽 (똥볼 패시브 활성화 시만 표시)
@@ -1488,11 +1489,64 @@ function create() {
 
     // ─── 동적 하늘 그라데이션 (아포칼립스) ────────────────
     // 별도 graphics 객체로 매 프레임 색이 은은하게 흐름 (drawSkyGradient)
-    uiSkyGradient = this.add.graphics().setDepth(-3);
+    uiSkyGradient = this.add.graphics().setDepth(-5);
     drawSkyGradient(0);   // 초기 1회 렌더
 
+    // ─── 저 멀리 태양의 여명 (오염된 흐릿한 태양 + 방사형 글로우) ──
+    // 지평선 근처에서 은은히 맥동. (0,0) 상대좌표로 그려 중심 기준 scale
+    const sunX = 2400, sunY = 415;
+    const sun = this.add.graphics().setDepth(-4.5).setPosition(sunX, sunY);
+    [[200, 0.06], [150, 0.09], [105, 0.13], [68, 0.20], [40, 0.34], [22, 0.6]]
+        .forEach(([r, a]) => sun.fillStyle(0xc25a2a, a).fillCircle(0, 0, r));
+    sun.fillStyle(0xe8915a, 0.5).fillCircle(0, 0, 16);   // 태양 코어
+    this.tweens.add({
+        targets: sun, scaleX: 1.10, scaleY: 1.10, alpha: 0.82,
+        duration: 4200, yoyo: true, repeat: -1, ease: 'Sine.InOut'
+    });
+
+    // ─── 솜사탕 구름 텍스처 생성 (부드러운 다겹 뭉게구름) ──
+    if (!this.textures.exists('softCloud')) {
+        const cg = this.make.graphics({ add: false });
+        // 뭉게구름 덩어리 — 여러 원 겹침 (x, y, r)
+        const puffs = [
+            [70, 70, 42], [125, 56, 54], [185, 64, 46],
+            [105, 80, 48], [160, 82, 44], [225, 74, 34], [45, 78, 30],
+        ];
+        // 1) 바깥 부드러운 헤일로 (반투명 크게)
+        cg.fillStyle(0xe6dcef, 0.18);
+        puffs.forEach(([x, y, r]) => cg.fillCircle(x, y, r * 1.35));
+        // 2) 중간 본체
+        cg.fillStyle(0xd8cce6, 0.45);
+        puffs.forEach(([x, y, r]) => cg.fillCircle(x, y, r));
+        // 3) 밝은 윗면 하이라이트 (솜사탕 폭신함)
+        cg.fillStyle(0xf4eef8, 0.75);
+        puffs.forEach(([x, y, r]) => cg.fillCircle(x, y - r * 0.28, r * 0.62));
+        cg.generateTexture('softCloud', 290, 150);
+        cg.destroy();
+    }
+
+    // ─── 구름 배치 (하늘 영역에 점점이, 천천히 흐름) ──────
+    uiClouds = [];
+    const cloudSpots = [
+        { x: 700,  y: 120, s: 0.9,  a: 0.55 },
+        { x: 2200, y: 90,  s: 1.3,  a: 0.42 },
+        { x: 3600, y: 160, s: 0.7,  a: 0.6  },
+        { x: 5000, y: 110, s: 1.1,  a: 0.48 },
+        { x: 6400, y: 75,  s: 1.5,  a: 0.36 },
+        { x: 7800, y: 145, s: 0.85, a: 0.55 },
+        { x: 9200, y: 100, s: 1.2,  a: 0.45 },
+        { x: 10600,y: 130, s: 0.95, a: 0.52 },
+    ];
+    cloudSpots.forEach((c, i) => {
+        const cloud = this.add.image(c.x, c.y, 'softCloud')
+            .setDepth(-4).setScale(c.s).setAlpha(c.a);
+        // 멀수록(작을수록) 느리게 → 패럴랙스 깊이감
+        cloud.cloudSpeed = 4 + c.s * 5;   // 8~12 px/s
+        uiClouds.push(cloud);
+    });
+
     // ─── 배경 레이어: 오염된 대지 (정적) ──────────────────
-    const worldBg = this.add.graphics().setDepth(-2);
+    const worldBg = this.add.graphics().setDepth(-3);
     // 지평선 방사능 글로우 (옅은 황록 — 오염된 빛)
     worldBg.fillStyle(0x3a4a1e, 0.30).fillRect(0, 300, WORLD_W, 180);
     worldBg.fillStyle(0x4a5a22, 0.22).fillRect(0, 360, WORLD_W, 120);
@@ -2127,6 +2181,15 @@ function update(time, delta) {
 
     // 동적 하늘 그라데이션 — 3프레임마다 (색 변화가 느려 충분)
     if (minimapFrame % 3 === 0) drawSkyGradient(time);
+
+    // 솜사탕 구름 서서히 흐름 (월드 좌우 wrap)
+    if (uiClouds.length > 0) {
+        const cdt = delta / 1000;
+        uiClouds.forEach(c => {
+            c.x += c.cloudSpeed * cdt;
+            if (c.x > WORLD_W + 250) c.x = -250;   // 우측 끝 → 좌측 재등장
+        });
+    }
 }
 
 // ─── 새 스폰 ──────────────────────────────────────────
@@ -2196,19 +2259,19 @@ function drawSkyGradient(time) {
     const g = uiSkyGradient;
     g.clear();
 
-    // 두 개의 매우 느린 위상 (서로 다른 주기 → 단조롭지 않게)
-    const p1 = (Math.sin(time * 0.00009) + 1) / 2;          // ~70초 주기
-    const p2 = (Math.sin(time * 0.00013 + 1.7) + 1) / 2;    // ~48초 주기
+    // 두 개의 위상 (서로 다른 주기 → 단조롭지 않게). 옵션 B 수준 — 뚜렷하게 흐름
+    const p1 = (Math.sin(time * 0.00028) + 1) / 2;          // ~22초 주기
+    const p2 = (Math.sin(time * 0.00035 + 1.7) + 1) / 2;    // ~18초 주기
 
-    // 아포칼립스 팔레트 — 탁한 적보라/먼지빛. 진폭 작게(은은)
-    // 상단(우주): 어두운 적보라 사이를 천천히
-    const topCol = lerpHex(0x140a18, 0x1c0e1a, p1);
-    // 중상단(오염 하늘): 탁한 자주~적갈
-    const upMid  = lerpHex(0x2a1622, 0x331a1c, p2);
-    // 중단(먼지 하늘): 탁한 적갈~황토
-    const loMid  = lerpHex(0x4a2a1e, 0x523018, p1);
-    // 지평선(오염 노을): 흐릿한 황적 + 방사능 황록 살짝
-    const horiz  = lerpHex(0x6a4020, 0x5e4a20, p2);
+    // 아포칼립스 팔레트 — 따뜻한 노을 ↔ 차가운 보라 황혼 (다른 계열로 극적)
+    // 상단(우주): 어두운 적보라 ↔ 어두운 청보라
+    const topCol = lerpHex(0x160a1a, 0x0e1024, p1);
+    // 중상단(오염 하늘): 탁한 자주 ↔ 탁한 청회
+    const upMid  = lerpHex(0x2e1626, 0x1c2236, p2);
+    // 중단(먼지 하늘): 적갈 ↔ 보랏빛 회색
+    const loMid  = lerpHex(0x4e2a1e, 0x3a2840, p1);
+    // 지평선(오염 노을): 주황 노을 ↔ 보라 황혼
+    const horiz  = lerpHex(0x824624, 0x5a3452, p2);
 
     const W = WORLD_W;
     // 영역을 3분할하여 다중 색상 세로 그라데이션 (경계 색 연속 → 부드러움)
@@ -2268,7 +2331,7 @@ function drawRuinedCity(scene, baseY) {
 // ─── 마른 가지 나무 (앞쪽 대지) ────────────────────────
 // 잎 없는 죽은 나무 — 갈라진 가지. 재귀로 가지 분기
 function drawDeadTrees(scene) {
-    const g = scene.add.graphics().setDepth(0);
+    const g = scene.add.graphics().setDepth(-0.5);   // 적(depth 0)보다 뒤
     const groundY = 680;
     const trees = [620, 1150, 1900, 2600, 3300]; // 새총 우측에 점점이
 
