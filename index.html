@@ -289,6 +289,7 @@ let uiOverlay = null;
 let uiPollutionText = null;
 let uiResearchBtn = null, uiResearchBtnTxt = null;  // 박사님 연구 버튼 (HUD)
 let uiPanelBg = null, uiPanelTitle = null, uiPanelContent = null;
+let uiSkyGradient = null;  // 동적 하늘 그라데이션 (아포칼립스 — 은은하게 색이 흐름)
 let uiSlingStand = null;   // 새총 거치대 그래픽 (높이개조 패시브로 동적 재렌더)
 let uiTwinStand  = null;   // 분신 쌍둥이 새총 그래픽 (분신 패시브 활성화 시만 표시)
 let uiKicker     = null;   // 똥볼 축구선수 그래픽 (똥볼 패시브 활성화 시만 표시)
@@ -1485,26 +1486,24 @@ function create() {
     this.cameras.main.centerOn(SLING_CENTER.x, CAM_HOME_Y);
     this.cameras.main.setRoundPixels(true);  // 서브픽셀 렌더링 OFF → 카메라 흔들림 제거
 
-    // ─── 배경 레이어: 우주 ~ 하늘 ~ 산 ~ 흙 ─────────────────
-    // 반투명 레이어를 겹쳐 색이 자연스럽게 섞이도록 함
+    // ─── 동적 하늘 그라데이션 (아포칼립스) ────────────────
+    // 별도 graphics 객체로 매 프레임 색이 은은하게 흐름 (drawSkyGradient)
+    uiSkyGradient = this.add.graphics().setDepth(-3);
+    drawSkyGradient(0);   // 초기 1회 렌더
+
+    // ─── 배경 레이어: 오염된 대지 (정적) ──────────────────
     const worldBg = this.add.graphics().setDepth(-2);
-    worldBg.fillStyle(0x02040e, 1   ).fillRect(0, WORLD_TOP, WORLD_W, 4500);  // 심우주 (base)
-    worldBg.fillStyle(0x060e28, 0.80).fillRect(0, -3800,     WORLD_W, 2100);  // 어두운 하늘
-    worldBg.fillStyle(0x0e1c4a, 0.75).fillRect(0, -2000,     WORLD_W, 1300);  // 밤하늘
-    worldBg.fillStyle(0x1e3a8a, 0.68).fillRect(0, -900,      WORLD_W, 750);   // 진한 파란 하늘
-    worldBg.fillStyle(0x3468b8, 0.62).fillRect(0, -220,      WORLD_W, 440);   // 하늘
-    worldBg.fillStyle(0x5a90cc, 0.56).fillRect(0,  160,      WORLD_W, 280);   // 밝은 하늘
-    worldBg.fillStyle(0x4a7830, 0.90).fillRect(0,  380,      WORLD_W, 310);   // 산/숲 녹지
-    worldBg.fillStyle(0x7a5030, 1   ).fillRect(0,  680,      WORLD_W, 80);    // 흙 표층
-    worldBg.fillStyle(0x4a2e18, 1   ).fillRect(0,  760,      WORLD_W, 250);   // 지하
+    // 지평선 방사능 글로우 (옅은 황록 — 오염된 빛)
+    worldBg.fillStyle(0x3a4a1e, 0.30).fillRect(0, 300, WORLD_W, 180);
+    worldBg.fillStyle(0x4a5a22, 0.22).fillRect(0, 360, WORLD_W, 120);
+    // 오염된 대지 (탁한 적갈/황록)
+    worldBg.fillStyle(0x3a3420, 0.92).fillRect(0,  440, WORLD_W, 240);   // 메마른 평원
+    worldBg.fillStyle(0x4a3a22, 1   ).fillRect(0,  680, WORLD_W, 80);    // 흙 표층
+    worldBg.fillStyle(0x2a1c10, 1   ).fillRect(0,  760, WORLD_W, 250);   // 지하
 
-    // ── 채도 다운 오버레이 — 적들이 배경에서 튀어보이도록 ──
-    // 회색-블루 톤 옅게 덮어 전체 채도를 살짝 낮춤
-    worldBg.fillStyle(0x202830, 0.22).fillRect(0, WORLD_TOP, WORLD_W, WORLD_H);
-
-    // 원거리 산 능선 — 코사인 다중합성으로 부드러운 곡선 생성
+    // 원거리 산 능선 — 코사인 다중합성 (오염된 잿빛 보라)
     const mtFar = this.add.graphics().setDepth(-1);
-    mtFar.fillStyle(0x1c4a1e, 0.72);
+    mtFar.fillStyle(0x241a2a, 0.78);
     const farPts = [{ x: 0, y: 492 }];
     for (let i = 0; i <= 400; i++) {
         const t = i / 400;
@@ -1517,9 +1516,12 @@ function create() {
     farPts.push({ x: WORLD_W, y: 492 });
     mtFar.fillPoints(farPts, true);
 
-    // 근거리 산/언덕 능선 — 더 크고 선명한 곡선
+    // ─── 저 멀리 폐허가 된 도시 실루엣 (원거리 산 위에 점점이) ───
+    drawRuinedCity(this, 470);
+
+    // 근거리 산/언덕 능선 — 메마른 황갈 대지
     const mtNear = this.add.graphics().setDepth(-1);
-    mtNear.fillStyle(0x2a5c1e, 0.84);
+    mtNear.fillStyle(0x2e2418, 0.88);
     const nearPts = [{ x: 0, y: 662 }];
     for (let i = 0; i <= 400; i++) {
         const t = i / 400;
@@ -1531,6 +1533,9 @@ function create() {
     }
     nearPts.push({ x: WORLD_W, y: 662 });
     mtNear.fillPoints(nearPts, true);
+
+    // ─── 마른 가지 나무 (앞쪽 대지에 점점이) ───────────────
+    drawDeadTrees(this);
 
     // 지표면 라인
     const soilLine = this.add.graphics().setDepth(0);
@@ -2119,6 +2124,9 @@ function update(time, delta) {
     // 미니맵은 4프레임마다 갱신 (성능 최적화)
     minimapFrame++;
     if (minimapFrame % 4 === 0) drawMinimap();
+
+    // 동적 하늘 그라데이션 — 3프레임마다 (색 변화가 느려 충분)
+    if (minimapFrame % 3 === 0) drawSkyGradient(time);
 }
 
 // ─── 새 스폰 ──────────────────────────────────────────
@@ -2170,6 +2178,124 @@ function spawnBird(scene, withFade = false, fixedX = null, forcedType = null) {
 
 // 패시브가 현재 활성 상태인지 (보유 + 토글 ON)
 function isOn(name) { return passiveActive[name] !== false; }
+
+// ─── 색 보간 헬퍼 (hex int 두 색을 t=0~1 비율로 lerp) ────
+function lerpHex(a, b, t) {
+    const ar = (a >> 16) & 255, ag = (a >> 8) & 255, ab = a & 255;
+    const br = (b >> 16) & 255, bg = (b >> 8) & 255, bb = b & 255;
+    const r = Math.round(ar + (br - ar) * t);
+    const g = Math.round(ag + (bg - ag) * t);
+    const bl = Math.round(ab + (bb - ab) * t);
+    return (r << 16) | (g << 8) | bl;
+}
+
+// ─── 동적 하늘 그라데이션 (아포칼립스, 은은하게 흐름) ────
+// 발라트로 배경의 ~20% 수준 — 어지럽지 않게 천천히 색이 변함
+function drawSkyGradient(time) {
+    if (!uiSkyGradient) return;
+    const g = uiSkyGradient;
+    g.clear();
+
+    // 두 개의 매우 느린 위상 (서로 다른 주기 → 단조롭지 않게)
+    const p1 = (Math.sin(time * 0.00009) + 1) / 2;          // ~70초 주기
+    const p2 = (Math.sin(time * 0.00013 + 1.7) + 1) / 2;    // ~48초 주기
+
+    // 아포칼립스 팔레트 — 탁한 적보라/먼지빛. 진폭 작게(은은)
+    // 상단(우주): 어두운 적보라 사이를 천천히
+    const topCol = lerpHex(0x140a18, 0x1c0e1a, p1);
+    // 중상단(오염 하늘): 탁한 자주~적갈
+    const upMid  = lerpHex(0x2a1622, 0x331a1c, p2);
+    // 중단(먼지 하늘): 탁한 적갈~황토
+    const loMid  = lerpHex(0x4a2a1e, 0x523018, p1);
+    // 지평선(오염 노을): 흐릿한 황적 + 방사능 황록 살짝
+    const horiz  = lerpHex(0x6a4020, 0x5e4a20, p2);
+
+    const W = WORLD_W;
+    // 영역을 3분할하여 다중 색상 세로 그라데이션 (경계 색 연속 → 부드러움)
+    // 1) 우주 → 중상단
+    g.fillGradientStyle(topCol, topCol, upMid, upMid, 1);
+    g.fillRect(0, WORLD_TOP, W, (-2200) - WORLD_TOP);
+    // 2) 중상단 → 중단
+    g.fillGradientStyle(upMid, upMid, loMid, loMid, 1);
+    g.fillRect(0, -2200, W, 2200);
+    // 3) 중단 → 지평선
+    g.fillGradientStyle(loMid, loMid, horiz, horiz, 1);
+    g.fillRect(0, 0, W, 480);
+}
+
+// ─── 저 멀리 폐허가 된 도시 실루엣 ─────────────────────
+// 원거리 산 위에 부서진 빌딩들이 점점이. 어두운 실루엣 + 옅은 창문 불빛
+function drawRuinedCity(scene, baseY) {
+    const g = scene.add.graphics().setDepth(-1);
+    // 도시 구역 — 맵 전체에 3개 군집
+    const clusters = [1400, 5200, 9000];
+    clusters.forEach((cx, ci) => {
+        // 각 군집에 빌딩 6~9개
+        const count = 6 + (ci % 3);
+        for (let i = 0; i < count; i++) {
+            const bx = cx + (i - count / 2) * 46 + ((i * 37) % 23);
+            const bw = 24 + ((i * 13) % 20);
+            const bh = 50 + ((i * 53) % 130);
+            // 부서진 윗부분 (절반은 기울어진 폐허)
+            const broken = (i % 3 === 0);
+            // 빌딩 실루엣 (아주 어두운 잿빛 보라)
+            g.fillStyle(0x161018, 0.82);
+            if (broken) {
+                // 무너진 빌딩 — 사다리꼴 (위가 비스듬)
+                g.fillPoints([
+                    { x: bx,        y: baseY },
+                    { x: bx,        y: baseY - bh },
+                    { x: bx + bw,   y: baseY - bh * 0.6 },
+                    { x: bx + bw,   y: baseY },
+                ], true);
+            } else {
+                g.fillRect(bx, baseY - bh, bw, bh);
+            }
+            // 창문 불빛 — 드문드문 살아남은 옅은 황색/적색 (몇 개만)
+            if (i % 2 === 0) {
+                const winCol = (i % 4 === 0) ? 0x886622 : 0x6a3322;
+                g.fillStyle(winCol, 0.55);
+                for (let wy = baseY - bh + 12; wy < baseY - 8; wy += 22) {
+                    if (((wy + i) % 3) !== 0) continue;   // 드문드문
+                    g.fillRect(bx + 6, wy, 4, 5);
+                    if (bw > 28) g.fillRect(bx + bw - 10, wy, 4, 5);
+                }
+            }
+        }
+    });
+}
+
+// ─── 마른 가지 나무 (앞쪽 대지) ────────────────────────
+// 잎 없는 죽은 나무 — 갈라진 가지. 재귀로 가지 분기
+function drawDeadTrees(scene) {
+    const g = scene.add.graphics().setDepth(0);
+    const groundY = 680;
+    const trees = [620, 1150, 1900, 2600, 3300]; // 새총 우측에 점점이
+
+    const branch = (x, y, ang, len, depth, width) => {
+        if (depth <= 0 || len < 6) return;
+        const ex = x + Math.cos(ang) * len;
+        const ey = y + Math.sin(ang) * len;
+        g.lineStyle(width, 0x1a120a, 0.9);
+        g.lineBetween(x, y, ex, ey);
+        // 분기 2~3개
+        const branches = depth > 2 ? 2 : 3;
+        for (let b = 0; b < branches; b++) {
+            const spread = 0.5 + (b * 0.35);
+            const dir = (b % 2 === 0) ? -1 : 1;
+            branch(ex, ey, ang + dir * spread * (0.5 + (b * 0.2)),
+                   len * 0.72, depth - 1, Math.max(1, width * 0.65));
+        }
+    };
+
+    trees.forEach((tx, ti) => {
+        const trunkLen = 46 + (ti * 17) % 30;
+        const trunkW   = 6 + (ti % 3);
+        // 살짝 기울어진 죽은 나무 (방사능에 비틀림)
+        const lean = ((ti % 2 === 0) ? -1 : 1) * 0.12;
+        branch(tx, groundY, -Math.PI / 2 + lean, trunkLen, 4, trunkW);
+    });
+}
 
 // ─── 모든 패시브 스택 초기화 (새 게임 시작 시) ──────────
 // DEV MODE 시작 경로에서는 호출되지 않음 (DEV MODE 가 설정한 스택을 보존하기 위해)
