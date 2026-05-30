@@ -114,8 +114,9 @@ const TOGGLE_Y      = 8 + PANEL_MIN_H + 18;         // = 406 (미니맵 토글 y
 const MM_X = 8,   MM_Y = TOGGLE_Y + 24;             // 미니맵 좌상단 (= 430)
 const MM_W = 256, MM_H = 158;                       // 미니맵 크기 (원본 158)
 const REMAINING_Y = MM_Y + MM_H + 12;               // 남은 오염 생물 y (= 600)
-const SETTING_BTN_Y = REMAINING_Y + 32;             // 설정 버튼 y
-const HOME_BTN_Y    = SETTING_BTN_Y + 28;           // 처음으로 버튼 y
+// 설정 버튼 — 우하단 구석 (새총 드래그 영역과 간섭 없도록)
+const SETTING_BTN_X = 1206;
+const SETTING_BTN_Y = 694;
 const MM_WY0 = -450, MM_WY1 = 800;
 const MM_WX0 = 0,    MM_WX1 = WORLD_LIMIT_X; // WORLD_LIMIT_X 와 동일
 
@@ -304,7 +305,6 @@ let permanentHitAreas = [];
 let minimapVisible  = true;
 let uiMinimapBtnBg  = null, uiMinimapBtnTxt = null;
 let uiSettingBtnBg  = null, uiSettingBtnTxt = null;
-let uiHomeBtnBg     = null, uiHomeBtnTxt    = null;
 
 // ─── 오디오 상태 ──────────────────────────────────────
 let currentBgm      = null;
@@ -1749,26 +1749,16 @@ function create() {
         }
     });
 
-    // ─── 설정 버튼 (HUD 좌측 패널 하단) ──────────────────
+    // ─── 설정 버튼 (우하단 구석 — 새총 드래그 영역과 간섭 없음) ──
+    // '처음으로'는 설정 모달 안으로 이동 (2중 구조)
     uiSettingBtnBg  = this.add.graphics().setScrollFactor(0).setDepth(9);
-    uiSettingBtnTxt = this.add.text(PANEL_CX, SETTING_BTN_Y, '⚙  설정', {
+    uiSettingBtnTxt = this.add.text(SETTING_BTN_X, SETTING_BTN_Y, '⚙  설정', {
         fontFamily: 'Arial Black', fontSize: '14px', color: '#cccccc'
     }).setOrigin(0.5).setScrollFactor(0).setDepth(9);
-    drawSideBtn(uiSettingBtnBg, SETTING_BTN_Y, 1.0);
+    drawSideBtn(uiSettingBtnBg, 1.0);
     permanentHitAreas.push({
-        x: PANEL_CX, y: SETTING_BTN_Y, hw: 100, hh: 13,
+        x: SETTING_BTN_X, y: SETTING_BTN_Y, hw: 60, hh: 16,
         cb: () => openInGameSettings(sceneRef)
-    });
-
-    // ─── 처음으로 버튼 (메인 메뉴로 복귀) ──────────────────
-    uiHomeBtnBg  = this.add.graphics().setScrollFactor(0).setDepth(9);
-    uiHomeBtnTxt = this.add.text(PANEL_CX, HOME_BTN_Y, '🏠  처음으로', {
-        fontFamily: 'Arial Black', fontSize: '14px', color: '#cccccc'
-    }).setOrigin(0.5).setScrollFactor(0).setDepth(9);
-    drawSideBtn(uiHomeBtnBg, HOME_BTN_Y, 1.0);
-    permanentHitAreas.push({
-        x: PANEL_CX, y: HOME_BTN_Y, hw: 100, hh: 13,
-        cb: () => confirmGoToMainMenu(sceneRef)
     });
 
     // 조준화면으로 버튼 (줌 아웃 시 화면 중앙에 표시)
@@ -2999,11 +2989,9 @@ function compensateHUDZoom() {
     p = f(18,  52); if (uiPanelContent) uiPanelContent.setPosition(p.x, p.y).setFontSize(`${14 / z}px`);
     drawMinimapBtn(z);
     p = f(PANEL_CX, TOGGLE_Y); if (uiMinimapBtnTxt) uiMinimapBtnTxt.setPosition(p.x, p.y).setFontSize(`${18 / z}px`);
-    // 설정 / 처음으로 보조 버튼
-    drawSideBtn(uiSettingBtnBg, SETTING_BTN_Y, z);
-    drawSideBtn(uiHomeBtnBg,    HOME_BTN_Y,    z);
-    p = f(PANEL_CX, SETTING_BTN_Y); if (uiSettingBtnTxt) uiSettingBtnTxt.setPosition(p.x, p.y).setFontSize(`${14 / z}px`);
-    p = f(PANEL_CX, HOME_BTN_Y);    if (uiHomeBtnTxt)    uiHomeBtnTxt.setPosition(p.x, p.y).setFontSize(`${14 / z}px`);
+    // 설정 버튼 (우하단)
+    drawSideBtn(uiSettingBtnBg, z);
+    p = f(SETTING_BTN_X, SETTING_BTN_Y); if (uiSettingBtnTxt) uiSettingBtnTxt.setPosition(p.x, p.y).setFontSize(`${14 / z}px`);
     // 조준화면으로 버튼은 화면 정중앙 → 위치는 불변, 크기만 역보정
     if (uiAimBtn) { uiAimBtn.setScale(1 / z); uiAimBtnTxt.setScale(1 / z); }
     // 패시브 라인 줌 보정 (각 오브젝트에 저장된 _hx, _hy, _fs 사용)
@@ -5617,28 +5605,28 @@ function drawMinimapBtn(z) {
 }
 
 // 사이드 패널 보조 버튼 (설정 / 처음으로) — z 보정 포함 둥근 배경
-function drawSideBtn(g, btnY, z) {
+function drawSideBtn(g, z) {
     if (!g) return;
     g.clear();
     const cx = config.width / 2, cy = config.height / 2;
-    const bw = 200 / z, bh = 22 / z;
-    const x0 = cx + (PANEL_CX - cx) / z - bw / 2;
-    const y0 = cy + (btnY     - cy) / z - bh / 2;
-    g.fillStyle(0x100c04, 0.85).fillRoundedRect(x0, y0, bw, bh, 5 / z);
-    g.lineStyle(1 / z, 0x4a3010, 0.7).strokeRoundedRect(x0, y0, bw, bh, 5 / z);
+    const bw = 108 / z, bh = 30 / z;
+    const x0 = cx + (SETTING_BTN_X - cx) / z - bw / 2;
+    const y0 = cy + (SETTING_BTN_Y - cy) / z - bh / 2;
+    g.fillStyle(0x1a1208, 0.90).fillRoundedRect(x0, y0, bw, bh, 6 / z);
+    g.lineStyle(1.5 / z, 0x886633, 0.85).strokeRoundedRect(x0, y0, bw, bh, 6 / z);
 }
 
-// 게임 내 설정 모달 — 볼륨 컨트롤
+// 게임 내 설정 모달 — 볼륨 컨트롤 + 처음으로(2중 구조)
 function openInGameSettings(scene) {
     if (uiOverlay) return;   // 다른 모달이 열려있으면 패스
     uiOverlay = scene.add.container(0, 0).setDepth(50).setScrollFactor(0);
     mkRect(scene, uiOverlay, 0, 0, 1280, 720, 0x000000, 0.82);
-    mkPanel(scene, uiOverlay, 380, 230, 520, 280);
+    mkPanel(scene, uiOverlay, 380, 215, 520, 320);
 
-    mkText(scene, uiOverlay, 640, 274, '⚙  설정', {
+    mkText(scene, uiOverlay, 640, 258, '⚙  설정', {
         fontFamily: 'Arial Black', fontSize: '28px', color: '#e8a030'
     });
-    mkText(scene, uiOverlay, 640, 316, '게임 중 볼륨 조정', {
+    mkText(scene, uiOverlay, 640, 298, '게임 중 볼륨 조정', {
         fontFamily: 'Arial', fontSize: '13px', color: '#888888'
     });
 
@@ -5665,14 +5653,22 @@ function openInGameSettings(scene) {
         bgmVolume = v;
         if (currentBgm) currentBgm.volume = v;
         clearOverlay();
-    }, 372);
+    }, 350);
     drawVolBtns('SFX', () => sfxVolume, (v) => {
         sfxVolume = v;
         clearOverlay();
-    }, 414);
+    }, 392);
 
-    mkBtn(scene, uiOverlay, 640, 482, 160, 36, '닫 기', 0x39ff14, '#000000',
-        () => clearOverlay(), 14);
+    // 구분선
+    const div = scene.add.graphics();
+    div.lineStyle(1, 0x4a3010, 0.8).lineBetween(420, 432, 860, 432);
+    uiOverlay.add(div);
+
+    // 하단 버튼 — 처음으로 / 닫기 (2중 구조)
+    mkBtn(scene, uiOverlay, 530, 478, 200, 40, '🏠 처음으로', 0xcc5533, '#ffffff',
+        () => { clearOverlay(); confirmGoToMainMenu(scene); }, 15);
+    mkBtn(scene, uiOverlay, 760, 478, 150, 40, '닫 기', 0x39ff14, '#000000',
+        () => clearOverlay(), 15);
 }
 
 // '처음으로' 확인 다이얼로그 → 메인 메뉴
