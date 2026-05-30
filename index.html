@@ -1481,6 +1481,21 @@ function create() {
     pendingDispatchX = null;     // 보류된 파견 이동도 클리어
     clearDispatchTraces();        // 파견 자국 흙 그래픽 제거 (있다면)
 
+    // ─── 게임 상태 초기화 (새 게임/재시작 시 이전 판 값 잔류 방지) ──
+    // 특히 currentAmmo=0, isRoundEnding=true 가 남으면 둘째 판에서 돌이 안 생김
+    currentAmmo     = MAX_AMMO;
+    currentMaxAmmo  = MAX_AMMO;
+    isRoundEnding   = false;
+    isDragging      = false;
+    cameraFollowing = false;
+    currentStone    = null;
+    roundNumber     = 1;
+    totalBirdsHit   = 0;
+    roundBirdsHit   = 0;
+    roundMaterial   = 0;
+    materialStock   = 0;
+    remainingBirds  = 0;
+
     // 물리 월드 범위 — 세로를 축소하여 Arcade physics 연산 비용 절감
     this.physics.world.setBounds(0, -1200, WORLD_W, 2200);
     this.cameras.main.setBounds(0, WORLD_TOP, WORLD_LIMIT_X + 80, WORLD_H);
