@@ -3917,7 +3917,7 @@ function killEnemiesInRift(scene, originX, originY) {
 // 빔 폭 안의 모든 적(높이 무관)이 -1 피격
 function spawnGroundZero(scene, gx) {
     const cam      = scene.cameras.main;
-    const beamTopY = cam.scrollY - 100;        // 화면 상단 위 (보이지 않는 곳에서 출발)
+    const beamTopY = WORLD_TOP;                 // 월드 최상단(하늘 끝)부터 — 화면 밖 위쪽까지 수직 기둥
     const beamLen  = GROUND_Y - beamTopY;
     const BEAM_W   = 56;                       // 빔 시각 폭
     const HIT_HALF = BEAM_W / 2 + 6;           // 피격 판정은 시각보다 약간 넓게
@@ -3968,10 +3968,13 @@ function spawnGroundZero(scene, gx) {
         ease: 'Quad.In', onComplete: () => core.destroy() });
 
     // 3) 빔 본체 위에 흐르는 노이즈 라인 (역동적 느낌) — 짧은 가로 슬라이스 3개
+    // 빔이 월드 전체로 길어졌으므로 슬라이스는 화면(카메라 뷰) 안에서 시작
+    const camViewTop = cam.scrollY;
+    const camViewH   = config.height / cam.zoom;
     for (let k = 0; k < 3; k++) {
         const slice = scene.add.rectangle(
             gx,
-            beamTopY + beamLen * (0.15 + k * 0.3),
+            camViewTop + camViewH * (0.1 + k * 0.28),
             BEAM_W * 1.1,
             5,
             0xffffff, 0.85
