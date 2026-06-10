@@ -4569,10 +4569,14 @@ function doFireStone(px, py) {
         cameraFollowing = true;
         setAimBtnVisible(false);
         playSfx('shoot');
-        // 손맛 E: 발사 줌펀치 — 카메라 살짝 줌인했다 복귀 (탄력감)
-        const cam = sceneRef.cameras.main;
-        cam.zoomTo(1.035, 70, 'Quad.Out', true);
-        sceneRef.time.delayedCall(95, () => cam.zoomTo(1.0, 180, 'Quad.Out', true));
+        // 손맛 E: 발사 줌펀치 — 카메라 zoom 을 살짝 키웠다 복귀 (tween yoyo, 예외 보호)
+        try {
+            const cam = sceneRef.cameras.main;
+            sceneRef.tweens.add({
+                targets: cam, zoom: 1.035,
+                duration: 80, yoyo: true, ease: 'Quad.Out'
+            });
+        } catch (e) { /* 줌펀치 실패해도 발사 흐름은 계속 */ }
     }
 
     // ── 발사 시 슬링샷 boing 애니메이션 (Elastic.Out으로 탄성 복원) ──
