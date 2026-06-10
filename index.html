@@ -310,7 +310,71 @@ let uiSettingBtnBg  = null, uiSettingBtnTxt = null;
 let currentBgm      = null;
 let bgmFadeTimer    = null;   // 진행 중인 페이드 타이머 ID (씬 전환 시 취소용)
 let bgmVolume       = 0.5;    // 0.0 ~ 1.0
-let sfxVolume       = 0.5;    // 0.0 ~ 1.0 (SFX 전용, 미래 확장용)
+let sfxVolume       = 0.5;    // 0.0 ~ 1.0
+
+// ─── 코드 합성 효과음 (Web Audio API — 외부 파일 없음) ──
+let _audioCtx = null;
+function getAudioCtx() {
+    if (!_audioCtx) {
+        try { _audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
+        catch (e) { return null; }
+    }
+    if (_audioCtx.state === 'suspended') _audioCtx.resume();  // autoplay 정책: 첫 제스처 후 깨움
+    return _audioCtx;
+}
+
+// 톤 합성 — 주파수 freqA→freqB 로 글라이드, ADSR 간이 엔벨로프
+function _tone(freqA, freqB, dur, wave, vol, delay) {
+    const ctx = getAudioCtx(); if (!ctx) return;
+    const t0  = ctx.currentTime + (delay || 0);
+    const osc = ctx.createOscillator();
+    const g   = ctx.createGain();
+    osc.type = wave || 'sine';
+    osc.frequency.setValueAtTime(freqA, t0);
+    if (freqB && freqB !== freqA)
+        osc.frequency.exponentialRampToValueAtTime(Math.max(1, freqB), t0 + dur);
+    const v = Math.max(0.0001, (vol ?? 0.3) * sfxVolume);
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(v, t0 + 0.006);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    osc.connect(g).connect(ctx.destination);
+    osc.start(t0); osc.stop(t0 + dur + 0.03);
+}
+
+// 노이즈 버스트 — 타격/폭발용 (lowpass 필터)
+function _noise(dur, vol, filterHz, delay) {
+    const ctx = getAudioCtx(); if (!ctx) return;
+    const t0  = ctx.currentTime + (delay || 0);
+    const n   = Math.floor(ctx.sampleRate * dur);
+    const buf = ctx.createBuffer(1, n, ctx.sampleRate);
+    const d   = buf.getChannelData(0);
+    for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+    const src = ctx.createBufferSource(); src.buffer = buf;
+    const flt = ctx.createBiquadFilter();
+    flt.type = 'lowpass'; flt.frequency.value = filterHz || 1200;
+    const g = ctx.createGain();
+    const v = Math.max(0.0001, (vol ?? 0.3) * sfxVolume);
+    g.gain.setValueAtTime(v, t0);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    src.connect(flt).connect(g).connect(ctx.destination);
+    src.start(t0); src.stop(t0 + dur + 0.02);
+}
+
+// 효과음 디스패치
+function playSfx(name) {
+    if (sfxVolume <= 0) return;
+    switch (name) {
+        case 'shoot':     _tone(680, 180, 0.16, 'triangle', 0.22); break;       // 발사 "퓽"
+        case 'hit':       _noise(0.07, 0.28, 2000); _tone(420, 150, 0.07, 'square', 0.12); break;  // 명중 "탁"
+        case 'kill':      _tone(520, 520, 0.07, 'sine', 0.18); _tone(840, 840, 0.11, 'sine', 0.18, 0.05); break;  // 처치 "띠링"
+        case 'boss':      _tone(280, 55, 0.5, 'sawtooth', 0.3); _noise(0.3, 0.22, 700); break;       // 보스 처치
+        case 'explosion': _noise(0.42, 0.4, 600); _tone(110, 38, 0.4, 'sawtooth', 0.26); break;      // 폭발
+        case 'beam':      _tone(180, 880, 0.28, 'sawtooth', 0.2); break;                              // 빔
+        case 'land':      _noise(0.09, 0.16, 480); break;                                             // 착지 "툭"
+        case 'nuke':      _noise(0.9, 0.5, 500); _tone(90, 30, 0.9, 'sawtooth', 0.3); break;          // 핵폭발
+        case 'rift':      _tone(120, 600, 0.6, 'sine', 0.22); _tone(600, 120, 0.6, 'sine', 0.18, 0.3); break;  // 차원균열
+    }
+}
 
 /**
  * playBgm(scene, key)
@@ -3266,6 +3330,7 @@ function doDragAt(px, py) {
 
 // ─── 지면 충격 파티클 (착지·바운스 공용) ────────────────
 function spawnGroundImpact(scene, x) {
+    playSfx('land');
     // 흙먼지 파편 — 좌우로 튀는 작은 사각형
     for (let i = 0; i < 6; i++) {
         const chip = scene.add.rectangle(
@@ -3317,6 +3382,7 @@ function spawnGroundImpact(scene, x) {
 
 // ─── 착지 폭발 (폭발 패시브 — 지면 충돌 시) ──────────
 function spawnGroundExplosion(scene, gx, gy, stone) {
+    playSfx('explosion');
     const EXPL_R = 130;
     const dmg    = stone ? (stone.damage ?? STONE_DAMAGE) : STONE_DAMAGE;
 
@@ -3998,6 +4064,7 @@ function killEnemiesInRift(scene, originX, originY) {
 // ─── 그라운드 제로 (RARE): 착지 시 하늘에서 수직 녹색 레이저 빔 ──
 // 빔 폭 안의 모든 적(높이 무관)이 -1 피격
 function spawnGroundZero(scene, gx) {
+    playSfx('beam');
     const cam      = scene.cameras.main;
     const beamTopY = WORLD_TOP;                 // 월드 최상단(하늘 끝)부터 — 화면 밖 위쪽까지 수직 기둥
     const beamLen  = GROUND_Y - beamTopY;
@@ -4501,6 +4568,7 @@ function doFireStone(px, py) {
     if (s) {
         cameraFollowing = true;
         setAimBtnVisible(false);
+        playSfx('shoot');
         // 손맛 E: 발사 줌펀치 — 카메라 살짝 줌인했다 복귀 (탄력감)
         const cam = sceneRef.cameras.main;
         cam.zoomTo(1.035, 70, 'Quad.Out', true);
@@ -4612,6 +4680,7 @@ function hitBird(stone, bird) {
     // ── 차원균열 (LEGENDARY): 명중 위치 ±500 다이아몬드 영역 즉사 ──
     if (dimensionRiftStack > 0 && isOn('차원균열')) {
         activeStones.killAndHide(stone);
+        playSfx('rift');
         spawnDimensionalRift(this, stone.x, stone.y);
         killEnemiesInRift(this, stone.x, stone.y);
         return;
@@ -4621,6 +4690,7 @@ function hitBird(stone, bird) {
     // 데미지 처리 / 패시브 전부보다 우선 발동 → 돌은 폭발과 함께 소멸
     if (nukeStack > 0 && isOn('핵탄두')) {
         activeStones.killAndHide(stone);
+        playSfx('nuke');
         spawnNukeEffect(this, stone.x, stone.y);
         annihilateAllEnemies(this, stone.x, stone.y);
         return;
@@ -4638,6 +4708,7 @@ function hitBird(stone, bird) {
 
     // 손맛 A: 히트스톱 — 명중 순간 묵직하게 (45ms)
     doHitStop(this, 45);
+    playSfx('hit');
 
     if (bird.hp > 0) {
         // 새 생존 — 피격 플래시 + 데미지 숫자
@@ -4672,9 +4743,12 @@ function hitBird(stone, bird) {
     const bx = bird.x, by = bird.y;
     const mat     = bird.materialValue ?? 10;
     const birdKey = bird.texture ? bird.texture.key : null;
-    // 손맛 G: 강적(HP 2+ — 독수리/촉수체/오버로드) 처치 시 짧은 슬로우모션
+    // 손맛 G: 강적(HP 2+ — 독수리/촉수체/오버로드) 처치 시 짧은 슬로우모션 + 묵직한 처치음
     if ((bird.maxHp ?? 1) >= 2) {
         doBossSlowmo(this, 280);
+        playSfx('boss');
+    } else {
+        playSfx('kill');
     }
     bird.destroy();
 
