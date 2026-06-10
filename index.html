@@ -323,6 +323,27 @@ function getAudioCtx() {
     return _audioCtx;
 }
 
+// ─── 오디오 잠금 해제 (autoplay 정책) ──────────────────
+// 브라우저는 사용자 제스처 전까지 AudioContext 를 suspended 로 둠.
+// 첫 클릭/터치/키 입력에서 resume + 무음 버퍼 1회 재생으로 확실히 unlock.
+function unlockAudio() {
+    const ctx = getAudioCtx();
+    if (!ctx) return;
+    if (ctx.state === 'running') return;   // 이미 unlock 완료 → 스킵
+    ctx.resume();
+    try {
+        const buf = ctx.createBuffer(1, 1, 22050);
+        const src = ctx.createBufferSource();
+        src.buffer = buf;
+        src.connect(ctx.destination);
+        src.start(0);
+    } catch (e) { /* 무시 */ }
+}
+// 페이지 첫 입력에서 1회 unlock (제스처 컨텍스트 보장)
+['pointerdown', 'touchstart', 'keydown', 'mousedown'].forEach(ev => {
+    window.addEventListener(ev, unlockAudio, { once: false, capture: true });
+});
+
 // 톤 합성 — 주파수 freqA→freqB 로 글라이드, ADSR 간이 엔벨로프
 function _tone(freqA, freqB, dur, wave, vol, delay) {
     const ctx = getAudioCtx(); if (!ctx) return;
