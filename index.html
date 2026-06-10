@@ -1495,6 +1495,9 @@ function create() {
     roundMaterial   = 0;
     materialStock   = 0;
     remainingBirds  = 0;
+    // 새총 높이 복원 — GAME START 경로(slingModStack=0)면 BASE 로,
+    // DEV MODE(slingModStack 유지)면 그 높이로. 게임오버 후 높이 잔류 방지.
+    applySlingHeight();
 
     // 물리 월드 범위 — 세로를 축소하여 Arcade physics 연산 비용 절감
     this.physics.world.setBounds(0, -1200, WORLD_W, 2200);
@@ -4449,26 +4452,15 @@ function doFireStone(px, py) {
         triggerTimeStop(sceneRef);
     }
 
-    // ── 다발장전 패시브: 0.2초 간격으로 추가 발사 ──
-    // 각 추가탄은 잔여 ammo 소비. 탄 떨어지면 그 시점에서 burst 중단.
+    // ── 다발장전 패시브: 0.2초 간격으로 추가 발사 (공짜 — ammo 소비 없음) ──
+    // 돌멩이는 메인 발사에서 1회만 차감됨. 추가탄은 순수 버프.
     const burstExtra = (burstLoadStack > 0 && isOn('다발장전')) ? burstLoadStack : 0;
     for (let i = 0; i < burstExtra; i++) {
         sceneRef.time.delayedCall(200 * (i + 1), () => {
-            if (currentAmmo <= 0) return;
             if (!sceneRef) return;
-            currentAmmo--;
-            if (uiAmmoText) uiAmmoText.setText(`남은 돌멩이: ${currentAmmo} / ${currentMaxAmmo}`);
             spawnBurstPuff(sceneRef);
             const sb = fireVolley(angle, dist, false);  // 분신도 추가탄에 동참
-            if (sb) {
-                cameraFollowing = true;   // 추가탄도 카메라 추적 대상
-            }
-            // 추가탄 발사로 탄이 떨어진 경우 → 라운드 종료 체크
-            if (currentAmmo <= 0) {
-                isRoundEnding = true;
-                sceneRef.time.delayedCall(2000, checkRoundEnd, [], sceneRef);
-            }
-            updateResearchBtn();
+            if (sb) cameraFollowing = true;             // 추가탄도 카메라 추적 대상
         });
     }
 
