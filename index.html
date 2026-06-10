@@ -1246,9 +1246,16 @@ function preload() {
         return g;
     };
 
+    // 돌멩이 — 고대비 비대칭 (회전이 눈에 보이도록 명암 + 점/크랙 무늬)
     const sg = newGfx();
-    sg.fillStyle(0x95a5a6, 1).fillCircle(15, 15, 15);
-    sg.fillStyle(0x7f8c8d, 1).fillCircle(10, 10, 8);
+    sg.fillStyle(0x565e62, 1).fillCircle(15, 15, 14);        // 베이스 (어두운 회색)
+    sg.fillStyle(0x8a969b, 1).fillCircle(12.5, 12.5, 11);    // 밝은 면 (좌상)
+    sg.fillStyle(0xc4ced2, 1).fillCircle(10.5, 10.5, 6);     // 하이라이트 (더 밝게)
+    sg.fillStyle(0x363c40, 1).fillCircle(19, 19, 7.5);       // 그림자 (우하 어두운)
+    // 무늬 — 회전 인지용 (어두운 점 + 크랙)
+    sg.fillStyle(0x2a2e32, 1).fillCircle(17.5, 10.5, 2.2);
+    sg.fillStyle(0x2a2e32, 1).fillCircle(10.5, 18.5, 1.7);
+    sg.lineStyle(1.3, 0x2a2e32, 0.85).lineBetween(8, 13.5, 14.5, 20);
     sg.generateTexture('stone', 30 * TEX_SCALE, 30 * TEX_SCALE);
     sg.destroy();
 
@@ -1908,6 +1915,23 @@ function update(time, delta) {
         if (!s.active) return;
 
         // ── 자석탄: 정점 감지 → 락온 → 끝까지 열추적 ──────────────────────────────
+        // 돌멩이 회전 (손맛 B) — 비행 중 수평 속도에 비례해 굴러가듯 회전
+        if (!s.settled && s.body) {
+            s.angle += s.body.velocity.x * 0.0006 * delta;
+
+            // 손맛 C: 잔상 — 빠른 돌 뒤에 옅은 페이드 (2프레임마다, 빠른 것만)
+            if (minimapFrame % 2 === 0) {
+                const spd = Math.hypot(s.body.velocity.x, s.body.velocity.y);
+                if (spd > 320) {
+                    const tr = sceneRef.add.image(s.x, s.y, 'stone')
+                        .setScale(s.scaleX, s.scaleY).setAngle(s.angle)
+                        .setAlpha(0.3).setDepth(0).setTint(0x88aaff);
+                    sceneRef.tweens.add({ targets: tr, alpha: 0, duration: 200,
+                        onComplete: () => tr.destroy() });
+                }
+            }
+        }
+
         if (magnetStack > 0 && isOn('자석탄') && !s.settled) {
 
             // ① 정점 통과 시 가장 가까운 적 락온 (1회)
@@ -2249,6 +2273,29 @@ function spawnBird(scene, withFade = false, fixedX = null, forcedType = null) {
 
 // 패시브가 현재 활성 상태인지 (보유 + 토글 ON)
 function isOn(name) { return passiveActive[name] !== false; }
+
+// ─── 손맛 A: 히트스톱 — 명중 순간 물리 짧게 정지 (묵직한 타격감) ──
+function doHitStop(scene, ms) {
+    if (!scene || !scene.physics || !scene.physics.world) return;
+    if (scene.physics.world.isPaused) return;   // 중첩 방지
+    scene.physics.world.pause();
+    scene.time.delayedCall(ms, () => {
+        if (scene.physics && scene.physics.world) scene.physics.world.resume();
+    });
+}
+
+// ─── 손맛 G: 보스 처치 슬로우모션 (짧게 시간 느려짐) ──────
+function doBossSlowmo(scene, dur) {
+    if (!scene || scene._bossSlowActive) return;
+    scene._bossSlowActive = true;
+    scene.physics.world.timeScale = 2.4;   // 2.4배 느림 (값 클수록 느림)
+    scene.tweens.timeScale = 0.45;
+    scene.time.delayedCall(dur, () => {
+        if (scene.physics && scene.physics.world) scene.physics.world.timeScale = 1;
+        scene.tweens.timeScale = 1;
+        scene._bossSlowActive = false;
+    });
+}
 
 // ─── 색 보간 헬퍼 (hex int 두 색을 t=0~1 비율로 lerp) ────
 function lerpHex(a, b, t) {
@@ -3249,6 +3296,23 @@ function spawnGroundImpact(scene, x) {
         ease: 'Quad.Out',
         onComplete: () => ring.destroy()
     });
+
+    // 손맛 F: 피어오르는 먼지 구름 (부드러운 원, 위로 퍼지며 페이드)
+    for (let i = 0; i < 5; i++) {
+        const px = x + Phaser.Math.Between(-22, 22);
+        const puff = scene.add.graphics().setDepth(5).setPosition(px, GROUND_Y - 2);
+        const col = Phaser.Utils.Array.GetRandom([0xb8a070, 0xa89060, 0xc8b080]);
+        puff.fillStyle(col, 0.42).fillCircle(0, 0, Phaser.Math.Between(7, 13));
+        scene.tweens.add({
+            targets: puff,
+            y: GROUND_Y - Phaser.Math.Between(22, 44),
+            scaleX: 2.2, scaleY: 2.2, alpha: 0,
+            duration: Phaser.Math.Between(420, 680),
+            delay: i * 25,
+            ease: 'Quad.Out',
+            onComplete: () => puff.destroy()
+        });
+    }
 }
 
 // ─── 착지 폭발 (폭발 패시브 — 지면 충돌 시) ──────────
@@ -4437,6 +4501,10 @@ function doFireStone(px, py) {
     if (s) {
         cameraFollowing = true;
         setAimBtnVisible(false);
+        // 손맛 E: 발사 줌펀치 — 카메라 살짝 줌인했다 복귀 (탄력감)
+        const cam = sceneRef.cameras.main;
+        cam.zoomTo(1.035, 70, 'Quad.Out', true);
+        sceneRef.time.delayedCall(95, () => cam.zoomTo(1.0, 180, 'Quad.Out', true));
     }
 
     // ── 발사 시 슬링샷 boing 애니메이션 (Elastic.Out으로 탄성 복원) ──
@@ -4568,11 +4636,21 @@ function hitBird(stone, bird) {
     const dmg = stone.damage ?? STONE_DAMAGE;
     bird.hp = (bird.hp ?? 1) - dmg;
 
+    // 손맛 A: 히트스톱 — 명중 순간 묵직하게 (45ms)
+    doHitStop(this, 45);
+
     if (bird.hp > 0) {
         // 새 생존 — 피격 플래시 + 데미지 숫자
         this.tweens.add({
             targets: bird, alpha: 0.15, duration: 75, yoyo: true, repeat: 2,
             onComplete: () => { if (bird && bird.active) bird.setAlpha(1); }
+        });
+        // 손맛 D: 스쿼시&스트레치 — 가로로 늘었다 복원 (말랑한 타격감)
+        const _sx = bird.scaleX, _sy = bird.scaleY;
+        this.tweens.add({
+            targets: bird, scaleX: _sx * 1.35, scaleY: _sy * 0.72,
+            duration: 90, yoyo: true, ease: 'Quad.Out',
+            onComplete: () => { if (bird && bird.active) bird.setScale(_sx, _sy); }
         });
         this.cameras.main.shake(50, 0.003);
 
@@ -4594,6 +4672,10 @@ function hitBird(stone, bird) {
     const bx = bird.x, by = bird.y;
     const mat     = bird.materialValue ?? 10;
     const birdKey = bird.texture ? bird.texture.key : null;
+    // 손맛 G: 강적(HP 2+ — 독수리/촉수체/오버로드) 처치 시 짧은 슬로우모션
+    if ((bird.maxHp ?? 1) >= 2) {
+        doBossSlowmo(this, 280);
+    }
     bird.destroy();
 
     roundBirdsHit++;
